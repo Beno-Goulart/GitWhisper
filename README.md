@@ -1,9 +1,9 @@
 <p align="center">
-  <strong>GitWhisper</strong>
+  <img src="logo.png" alt="GitWhisper" width="470">
 </p>
 
 <p align="center">
-  <strong>Git + Text — The script whispers the right commit message.</strong>
+  <strong>The script whispers the right commit message.</strong>
 </p>
 
 <p align="center">
