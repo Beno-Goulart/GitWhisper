@@ -23,9 +23,10 @@ fi
 # Get commits
 if [[ "$SINCE_TAG" == true ]]; then
     LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
-    if [[ -n "$LAST_TAG" ]]; then
+    if [[ $? -eq 0 && -n "$LAST_TAG" ]]; then
         LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad" --date=short)
     else
+        echo -e "\033[33mNo tags found. Showing all commits.\033[0m"
         LOG=$(git log --pretty=format:"%H|%s|%ad" --date=short -n "$LIMIT")
     fi
 else
@@ -52,10 +53,13 @@ while IFS= read -r line; do
     
     SHORT_HASH="${HASH:0:7}"
     
-    # Parse type
-    TYPE=$(echo "$MESSAGE" | grep -oE '^[a-z]+' | head -1)
+    # Parse type (handle gitmoji prefix like ♻ refactor: ...)
+    TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+\(' | head -1 | tr -d '(')
+    if [[ -z "$TYPE" ]]; then
+        TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+:' | head -1 | tr -d ':')
+    fi
     SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | tr -d '()')
-    DESC=$(echo "$MESSAGE" | sed 's/^[^:]*: //')
+    DESC=$(echo "$MESSAGE" | sed 's/.*:[[:space:]]*//')
     
     COMMIT_ENTRY="- "
     if [[ -n "$SCOPE" ]]; then
@@ -88,7 +92,7 @@ fi
 
 # Get version
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
-if [[ -n "$LAST_TAG" ]]; then
+if [[ $? -eq 0 && -n "$LAST_TAG" ]]; then
     CURRENT_VERSION="${LAST_TAG#v}"
 else
     CURRENT_VERSION="0.1.0"

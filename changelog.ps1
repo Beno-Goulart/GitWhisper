@@ -12,10 +12,16 @@ if (-not (Test-Path ".git")) {
 
 # Get commits
 if ($SinceTag) {
-    $lastTag = git describe --tags --abbrev=0 2>$null
+    $lastTag = ""
+    try {
+        $lastTag = git describe --tags --abbrev=0 2>&1
+        if ($LASTEXITCODE -ne 0) { $lastTag = "" }
+    } catch { $lastTag = "" }
+    
     if ($lastTag) {
         $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad" --date=short
     } else {
+        Write-Host "No tags found. Showing all commits." -ForegroundColor Yellow
         $log = git log --pretty=format:"%H|%s|%ad" --date=short -n $Limit
     }
 } else {
@@ -55,8 +61,8 @@ foreach ($line in ($log -split "`n")) {
     $message = $parts[1].Trim()
     $date = $parts[2].Trim()
     
-    # Parse type from message
-    $typeMatch = [regex]::Match($message, "^(\w+)(?:\(([^)]+)\))?[!]?:\s*(.+)")
+    # Parse type from message (handle gitmoji prefix like ♻ refactor: ...)
+    $typeMatch = [regex]::Match($message, "(\w+)(?:\(([^)]+)\))?[!]?:\s*(.+)")
     if ($typeMatch.Success) {
         $type = $typeMatch.Groups[1].Value.ToLower()
         $scope = $typeMatch.Groups[2].Value
@@ -92,7 +98,12 @@ if ($allCommits.Count -eq 0) {
 }
 
 # Get version from last tag or generate
-$lastTag = git describe --tags --abbrev=0 2>$null
+$lastTag = ""
+try {
+    $lastTag = git describe --tags --abbrev=0 2>&1
+    if ($LASTEXITCODE -ne 0) { $lastTag = "" }
+} catch { $lastTag = "" }
+
 if ($lastTag) {
     $currentVersion = $lastTag -replace "^v", ""
 } else {
@@ -137,10 +148,15 @@ foreach ($type in @("feat", "fix", "perf", "refactor", "docs", "test", "build", 
     if ($typeData.Commits.Count -gt 0) {
         $changelog += "### $($typeData.Title)`n`n"
         foreach ($commit in $typeData.Commits) {
-            if ($commit.Scope) {
-                $changelog += "- **$($commit.Scope):** $($commit.Description) (`$($commit.Hash)`)$([char]10)"
+            $cHash = $commit.Hash
+            $cScope = $commit.Scope
+            $cDesc = $commit.Description
+            if ($cScope) {
+                $line = "- **${cScope}:** ${cDesc} (${cHash})"
+                $changelog += $line + [char]10
             } else {
-                $changelog += "- $($commit.Description) (`$($commit.Hash)`)$([char]10)"
+                $line = "- ${cDesc} (${cHash})"
+                $changelog += $line + [char]10
             }
         }
         $changelog += [char]10
