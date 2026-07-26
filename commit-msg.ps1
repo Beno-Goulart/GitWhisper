@@ -416,7 +416,33 @@ function Get-CommitType {
     return @{ Type = "refactor"; Desc = ($parts -join ", ") }
 }
 
+# --- Auto-scope from branch name ---
+function Get-BranchScope {
+    $branch = git symbolic-ref --short HEAD 2>$null
+    if (-not $branch) { return "" }
+
+    $ignored = @("main", "master", "develop", "dev", "staging", "production", "release")
+    if ($ignored -contains $branch) { return "" }
+
+    if ($branch -match "/(.+)") {
+        $scope = $Matches[1]
+        $prefixes = @("feature/", "bugfix/", "hotfix/", "fix/", "chore/", "docs/", "test/", "refactor/", "perf/", "release/")
+        foreach ($p in $prefixes) {
+            if ($scope -match "^$p(.+)$") {
+                $scope = $Matches[1]
+                break
+            }
+        }
+        return $scope
+    }
+
+    return ""
+}
+
 $scope = Get-Scope -Files $allFiles
+if (-not $scope) {
+    $scope = Get-BranchScope
+}
 $result = Get-CommitType -Added $added -Modified $modified -Deleted $deleted -AddedLower $addedLower -ModifiedLower ($modified | ForEach-Object { $_.ToLower() }) -DeletedLower $deletedLower -DiffContent $diffContent
 
 $type = $result.Type
