@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="GitWhisper" width="470">
+  <img src="logo.png" alt="GitWhisper" width="250">
 </p>
 
 <p align="center">
