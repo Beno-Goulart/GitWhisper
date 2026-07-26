@@ -35,16 +35,23 @@ PS C:\MyProject> .\commit-msg.ps1
 
  src\auth\Login.js   | 12 ++++++++++
  src\api\user.js     |  5 +++--
- src\api\user.test.js | 20 ++++++++++++++++++
 
-=== Suggested messages ===
+=== Choose your commit message ===
 
-  WITH emoji:    ✅ test: adds validation test for user.test.js
-  WITHOUT emoji: test: adds validation test for user.test.js
+  [1] ✨ feat(auth): adds Login component
+  [2] feat(auth): adds Login component
+  [3] ✨ feat(auth): adds Login import and handleSubmit
+  [4] feat(auth): adds Login import and handleSubmit
+  [0] Cancel
 
---- Copy ---
-  git commit -m "✅ test: adds validation test for user.test.js"
-  git commit -m "test: adds validation test for user.test.js"
+  Select (0-4): 1
+
+  Committing: ✨ feat(auth): adds Login component
+
+  Push to remote? (y/n): y
+
+  Pushing...
+  Pushed successfully!
 ```
 
 ## Features
@@ -74,24 +81,18 @@ cd C:\MyProject
 git add .  # or selectively add files
 ```
 
-### 3. Generate the commit message
+### 3. Run the script and choose
 
 ```powershell
 .\commit-msg.ps1
-```
-
-### 4. Copy and run the suggested command
-
-```powershell
-git commit -m "✨ feat(auth): adds Login component in auth.js"
+# Select 1-4, then confirm push
 ```
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `.\commit-msg.ps1` | Generate commit message from staged changes |
-| `git commit -m "message"` | Copy the suggested commit from the output |
+| `.\commit-msg.ps1` | Generate commit message and commit interactively |
 
 ## Architecture
 

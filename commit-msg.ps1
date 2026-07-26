@@ -530,19 +530,48 @@ function Truncate-Msg {
 }
 
 # --- Output ---
-Write-Host "=== Simple (short) ===" -ForegroundColor Green
 Write-Host ""
-Write-Host "  $simpleWithEmoji" -ForegroundColor White
-Write-Host "  $simpleWithoutEmoji" -ForegroundColor DarkGray
+Write-Host "=== Choose your commit message ===" -ForegroundColor Green
 Write-Host ""
-
-Write-Host "=== Detailed (specific) ===" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  $detailWithEmoji" -ForegroundColor White
-Write-Host "  $detailWithoutEmoji" -ForegroundColor DarkGray
+Write-Host "  [1] $simpleWithEmoji" -ForegroundColor White
+Write-Host "  [2] $simpleWithoutEmoji" -ForegroundColor White
+Write-Host "  [3] $detailWithEmoji" -ForegroundColor White
+Write-Host "  [4] $detailWithoutEmoji" -ForegroundColor White
+Write-Host "  [0] Cancel" -ForegroundColor DarkGray
 Write-Host ""
 
-Write-Host "--- Copy ---" -ForegroundColor DarkGray
-Write-Host "  git commit -m `"$simpleWithEmoji`"" -ForegroundColor DarkCyan
-Write-Host "  git commit -m `"$detailWithEmoji`"" -ForegroundColor DarkCyan
+$choice = Read-Host "  Select (0-4)"
+
+switch ($choice) {
+    "1" { $selectedMsg = $simpleWithEmoji }
+    "2" { $selectedMsg = $simpleWithoutEmoji }
+    "3" { $selectedMsg = $detailWithEmoji }
+    "4" { $selectedMsg = $detailWithoutEmoji }
+    default {
+        Write-Host ""
+        Write-Host "  Cancelled." -ForegroundColor Yellow
+        exit 0
+    }
+}
+
 Write-Host ""
+Write-Host "  Committing: $selectedMsg" -ForegroundColor Cyan
+git commit -m "$selectedMsg"
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host ""
+    $push = Read-Host "  Push to remote? (y/n)"
+    if ($push -eq "y" -or $push -eq "Y") {
+        Write-Host ""
+        Write-Host "  Pushing..." -ForegroundColor Cyan
+        git push
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  Pushed successfully!" -ForegroundColor Green
+        } else {
+            Write-Host "  Push failed." -ForegroundColor Red
+        }
+    }
+} else {
+    Write-Host ""
+    Write-Host "  Commit failed." -ForegroundColor Red
+}

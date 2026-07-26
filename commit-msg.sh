@@ -401,19 +401,48 @@ if [[ -z "$SPECIFIC_DESC" ]]; then
 fi
 
 # --- Output ---
-echo -e "\033[32m=== Simple (short) ===\033[0m"
 echo ""
-echo "  $SIMPLE_WITH_EMOJI"
-echo -e "  \033[90m$SIMPLE_WITHOUT\033[0m"
+echo -e "\033[32m=== Choose your commit message ===\033[0m"
 echo ""
-
-echo -e "\033[36m=== Detailed (specific) ===\033[0m"
-echo ""
-echo "  $DETAIL_WITH_EMOJI"
-echo -e "  \033[90m$DETAIL_WITHOUT\033[0m"
+echo "  [1] $SIMPLE_WITH_EMOJI"
+echo "  [2] $SIMPLE_WITHOUT"
+echo "  [3] $DETAIL_WITH_EMOJI"
+echo "  [4] $DETAIL_WITHOUT"
+echo -e "  [0] \033[90mCancel\033[0m"
 echo ""
 
-echo -e "\033[90m--- Copy ---\033[0m"
-echo -e "  \033[36mgit commit -m \"$SIMPLE_WITH_EMOJI\"\033[0m"
-echo -e "  \033[36mgit commit -m \"$DETAIL_WITH_EMOJI\"\033[0m"
+read -p "  Select (0-4): " CHOICE
+
+case "$CHOICE" in
+    1) SELECTED_MSG="$SIMPLE_WITH_EMOJI" ;;
+    2) SELECTED_MSG="$SIMPLE_WITHOUT" ;;
+    3) SELECTED_MSG="$DETAIL_WITH_EMOJI" ;;
+    4) SELECTED_MSG="$DETAIL_WITHOUT" ;;
+    *)
+        echo ""
+        echo -e "  \033[33mCancelled.\033[0m"
+        exit 0
+        ;;
+esac
+
 echo ""
+echo -e "  \033[36mCommitting: $SELECTED_MSG\033[0m"
+git commit -m "$SELECTED_MSG"
+
+if [[ $? -eq 0 ]]; then
+    echo ""
+    read -p "  Push to remote? (y/n): " PUSH
+    if [[ "$PUSH" == "y" || "$PUSH" == "Y" ]]; then
+        echo ""
+        echo -e "  \033[36mPushing...\033[0m"
+        git push
+        if [[ $? -eq 0 ]]; then
+            echo -e "  \033[32mPushed successfully!\033[0m"
+        else
+            echo -e "  \033[31mPush failed.\033[0m"
+        fi
+    fi
+else
+    echo ""
+    echo -e "  \033[31mCommit failed.\033[0m"
+fi
