@@ -11,6 +11,8 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 
 ### Refactoring
 
+- **auth:** adds Get (b91f4e3)
+- adds error handling (bdcfa96)
 - adds error handling (f35e2ce)
 - 1 added, 1 modified (5b7064e)
 - adds and import (41de2ad)

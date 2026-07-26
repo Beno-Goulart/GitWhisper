@@ -24,7 +24,7 @@
 
 ---
 
-Gitext is a PowerShell script that analyzes your `git diff` and auto-generates **[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)** messages with **gitmoji** support. It detects file types, infers scope from folder structure, and produces specific descriptions by reading the actual diff content.
+GitWhisper is a cross-platform tool that analyzes your `git diff` and auto-generates **[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)** messages with **gitmoji** support. It detects file types, infers scope from folder structure, and produces specific descriptions by reading the actual diff content.
 
 ## Preview
 
@@ -62,40 +62,109 @@ PS C:\MyProject> .\commit-msg.ps1
 | Scope Inference | Reads folder structure to determine scope (auth, api, ui, etc.) |
 | Specific Descriptions | Analyzes diff content for imports, functions, classes, hooks, routes |
 | Gitmoji Support | Generates both emoji and non-emoji versions |
+| Undo Commit | Soft or mixed reset of the last commit via `-Undo` flag |
 | Staged Only | Only analyzes what's staged (what will be committed) |
 | PS 5.1 Compatible | Unicode escapes for full Windows PowerShell compatibility |
+| Cross-Platform | PowerShell for Windows, Bash for Linux/macOS |
 | 50/72 Rule | Enforces conventional commit summary length |
 
 ## Quick Start
 
 ### 1. Copy the script
 
+**Windows (PowerShell):**
+
 ```powershell
 Copy-Item "commit-msg.ps1" -Destination "C:\MyProject\"
 ```
 
+**Linux / macOS (Bash):**
+
+```bash
+cp commit-msg.sh /path/to/MyProject/
+chmod +x commit-msg.sh
+```
+
 ### 2. Stage your changes
+
+**Windows:**
 
 ```powershell
 cd C:\MyProject
 git add .  # or selectively add files
 ```
 
+**Linux / macOS:**
+
+```bash
+cd /path/to/MyProject
+git add .
+```
+
 ### 3. Run the script and choose
+
+**Windows:**
 
 ```powershell
 .\commit-msg.ps1
 # Select 1-4, then confirm push
 ```
 
+**Linux / macOS:**
+
+```bash
+./commit-msg.sh
+# Select 1-4, then confirm push
+```
+
+## Undo Last Commit
+
+Quickly undo the last commit with a simple interactive menu.
+
+### PowerShell
+
+```powershell
+.\commit-msg.ps1 -Undo
+```
+
+### Bash
+
+```bash
+./commit-msg.sh --undo
+# or
+./commit-msg.sh -u
+```
+
+### Reset Options
+
+| Option | Description |
+|---|---|
+| **Soft reset** | Undoes the commit, keeps changes **staged** (ready to re-commit) |
+| **Mixed reset** | Undoes the commit, **unstages** changes (files remain modified) |
+
+```
+=== Undo last commit ===
+
+  Last commit: ✨ feat(auth): adds Login component
+
+  [1] Soft reset  — keeps changes staged
+  [2] Mixed reset — unstages changes (keeps files)
+  [0] Cancel
+
+  Select (0-2): 1
+
+  Undone (soft). Changes are still staged.
+```
+
 ## Commands
 
 | Command | Description |
 |---|---|
-| `.\commit-msg.ps1` | Generate commit message and commit interactively |
-| `.\changelog.ps1` | Generate CHANGELOG.md from commit history |
-| `.\changelog.ps1 -SinceTag` | Generate only since last tag |
-| `.\changelog.ps1 -Limit 100` | Limit to last 100 commits |
+| `.\commit-msg.ps1` / `./commit-msg.sh` | Generate commit message and commit interactively |
+| `.\commit-msg.ps1 -Undo` / `./commit-msg.sh --undo` | Undo last commit (soft or mixed reset) |
+| `.\changelog.ps1` / `./changelog.sh` | Generate CHANGELOG.md from commit history |
+| `.\changelog.ps1 -SinceTag` / `./changelog.sh --since-tag` | Generate only since last tag |
+| `.\changelog.ps1 -Limit 100` / `./changelog.sh --limit 100` | Limit to last 100 commits |
 
 ## Architecture
 
