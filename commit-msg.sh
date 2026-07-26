@@ -1,12 +1,8 @@
 #!/bin/bash
 
 # GitWhisper - Smart commit messages from git diff
-# Usage: ./commit-msg.sh [--staged]
-
-STAGED=false
-if [[ "$1" == "--staged" || "$1" == "-s" ]]; then
-    STAGED=true
-fi
+# Usage: ./commit-msg.sh
+# Note: Only analyzes staged changes (what will be committed)
 
 # Check if git repo
 if [[ ! -d ".git" ]]; then
@@ -14,16 +10,10 @@ if [[ ! -d ".git" ]]; then
     exit 1
 fi
 
-# Get diff
-if [[ "$STAGED" == true ]]; then
-    DIFF_INDEX=$(git diff --staged --name-status)
-    DIFF_STAT=$(git diff --staged --stat)
-    DIFF_CONTENT=$(git diff --staged)
-else
-    DIFF_INDEX=$(git diff --name-status)
-    DIFF_STAT=$(git diff --stat)
-    DIFF_CONTENT=$(git diff)
-fi
+# Always use staged changes (git commit only commits what's staged)
+DIFF_INDEX=$(git diff --staged --name-status)
+DIFF_STAT=$(git diff --staged --stat)
+DIFF_CONTENT=$(git diff --staged)
 
 if [[ -z "$DIFF_INDEX" ]]; then
     echo -e "\033[33mNo changes found.\033[0m"

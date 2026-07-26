@@ -1,6 +1,4 @@
-param(
-    [switch]$Staged
-)
+param()
 
 $ErrorActionPreference = "Stop"
 
@@ -9,15 +7,10 @@ if (-not (Test-Path ".git")) {
     exit 1
 }
 
-if ($Staged) {
-    $diffIndex = git diff --staged --name-status
-    $diffStat = git diff --staged --stat
-    $diffContent = git diff --staged
-} else {
-    $diffIndex = git diff --name-status
-    $diffStat = git diff --stat
-    $diffContent = git diff
-}
+# Always use staged changes (git commit only commits what's staged)
+$diffIndex = git diff --staged --name-status
+$diffStat = git diff --staged --stat
+$diffContent = git diff --staged
 
 if (-not $diffIndex) {
     Write-Host "No changes found." -ForegroundColor Yellow

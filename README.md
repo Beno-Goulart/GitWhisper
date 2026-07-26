@@ -55,7 +55,7 @@ PS C:\MyProject> .\commit-msg.ps1
 | Scope Inference | Reads folder structure to determine scope (auth, api, ui, etc.) |
 | Specific Descriptions | Analyzes diff content for imports, functions, classes, hooks, routes |
 | Gitmoji Support | Generates both emoji and non-emoji versions |
-| Staged/Unstaged | Supports `git diff --staged` via `-Staged` flag |
+| Staged Only | Only analyzes what's staged (what will be committed) |
 | PS 5.1 Compatible | Unicode escapes for full Windows PowerShell compatibility |
 | 50/72 Rule | Enforces conventional commit summary length |
 
@@ -67,11 +67,11 @@ PS C:\MyProject> .\commit-msg.ps1
 Copy-Item "commit-msg.ps1" -Destination "C:\MyProject\"
 ```
 
-### 2. Make changes and stage them
+### 2. Stage your changes
 
 ```powershell
 cd C:\MyProject
-git add .
+git add .  # or selectively add files
 ```
 
 ### 3. Generate the commit message
@@ -90,8 +90,7 @@ git commit -m "✨ feat(auth): adds Login component in auth.js"
 
 | Command | Description |
 |---|---|
-| `.\commit-msg.ps1` | Analyze unstaged changes |
-| `.\commit-msg.ps1 -Staged` | Analyze staged changes only |
+| `.\commit-msg.ps1` | Generate commit message from staged changes |
 | `git commit -m "message"` | Copy the suggested commit from the output |
 
 ## Architecture
@@ -101,9 +100,9 @@ graph TD
     Script["commit-msg.ps1"]
 
     subgraph Input
-        DiffUnstaged["git diff --name-status"]
         DiffStaged["git diff --staged --name-status"]
-        DiffContent["git diff / git diff --staged"]
+        DiffStat["git diff --staged --stat"]
+        DiffContent["git diff --staged"]
     end
 
     subgraph Detection
@@ -123,11 +122,10 @@ graph TD
         NoEmoji["Without Emoji"]
     end
 
-    Script --> DiffUnstaged
     Script --> DiffStaged
+    Script --> DiffStat
     Script --> DiffContent
 
-    DiffUnstaged --> FileType
     DiffStaged --> FileType
     DiffContent --> DiffAnalysis
 
