@@ -154,7 +154,8 @@ function Get-CommitType {
         $dbPatterns | Where-Object { $file -match $_ }
     }
 
-    # --- Detect performance-related content ---
+    # --- Detect performance-related content (skip for docs, config, test, style, and script files) ---
+    $isScript = $allChanged | Where-Object { $_ -match "(commit-msg|\.sh$|\.ps1$|\.py$|\.rb$|\.js$|\.ts$)" }
     $hasPerfContent = $DiffContent -match "(perf|optim|cache|lazy|memo|defer|throttle|debounce|batch|index)"
 
     # --- Detect breaking change ---
@@ -354,8 +355,8 @@ function Get-CommitType {
         return @{ Type = "fix"; Desc = "fixes database schema" }
     }
 
-    # Performance content detected (skip for docs, config, test, style files)
-    if ($hasPerfContent -and $Added.Count -eq 0 -and $isDoc.Count -eq 0 -and $isConfig.Count -eq 0 -and $testFiles.Count -eq 0 -and $isStyle.Count -eq 0) {
+    # Performance content detected (skip for docs, config, test, style, and script files)
+    if ($hasPerfContent -and $Added.Count -eq 0 -and $isDoc.Count -eq 0 -and $isConfig.Count -eq 0 -and $testFiles.Count -eq 0 -and $isStyle.Count -eq 0 -and $isScript.Count -eq 0) {
         $perfItems = [regex]::Matches($diffAll, "(cache|memo|lazy|defer|throttle|debounce|batch|index|optim)")
         if ($perfItems.Count -gt 0) {
             $items = ($perfItems | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 2) -join ", "
@@ -428,6 +429,72 @@ $result = Get-CommitType -Added $added -Modified $modified -Deleted $deleted -Ad
 $type = $result.Type
 $desc = $result.Desc
 
+# --- Build detailed description from diff content ---
+$addedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^\+[^+]" }) -join "`n"
+
+$detailParts = @()
+
+# Extract meaningful items for detailed version
+$addedImports = [regex]::Matches($addedLines, "(?:import|require)\s*\{?\s*([\w]+)")
+if ($addedImports.Count -gt 0) {
+    $names = ($addedImports | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+    $detailParts += "adds $names import"
+}
+
+$addedFunctions = [regex]::Matches($addedLines, "(?:function|const|let|var)\s+(\w+)")
+if ($addedFunctions.Count -gt 0) {
+    $names = ($addedFunctions | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(module|exports|require|import)$" } | Select-Object -Unique | Select-Object -First 2) -join ", "
+    if ($names) { $detailParts += "adds $names" }
+}
+
+$addedClasses = [regex]::Matches($addedLines, "(?:class)\s+(\w+)")
+if ($addedClasses.Count -gt 0) {
+    $names = ($addedClasses | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+    $detailParts += "adds $names class"
+}
+
+$addedRoutes = [regex]::Matches($addedLines, "(?:router|Route|path)\s*\(\s*['""]([^'""]+)")
+if ($addedRoutes.Count -gt 0) {
+    $paths = ($addedRoutes | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+    $detailParts += "adds $paths route"
+}
+
+$addedHooks = [regex]::Matches($addedLines, "(useState|useEffect|useContext|useReducer|useMemo|useCallback|useRef)\s*\(")
+if ($addedHooks.Count -gt 0) {
+    $hookNames = ($addedLines | Select-String -Pattern "(\w+)\s*\(" | ForEach-Object { $_.Matches[0].Groups[1].Value } | Where-Object { $_ -match "^use" } | Select-Object -Unique | Select-Object -First 3) -join ", "
+    if ($hookNames) { $detailParts += "adds $hookNames" }
+}
+
+$addedEvents = [regex]::Matches($addedLines, "(?:addEventListener|\.on\(\s*['""])(\w+)")
+if ($addedEvents.Count -gt 0) {
+    $names = ($addedEvents | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+    $detailParts += "adds $names listener"
+}
+
+# Fallback patterns for detailed version
+if ($detailParts.Count -eq 0) {
+    if ($addedLines -match "(try|catch|throw|Error)") {
+        $detailParts += "adds error handling"
+    }
+    elseif ($addedLines -match "(fetch|axios|http|api|endpoint)") {
+        $detailParts += "adds API call"
+    }
+    elseif ($addedLines -match "(className|class=|style=)") {
+        $detailParts += "updates styles"
+    }
+    elseif ($addedLines -match "(margin|padding|border|color|font|display|flex|grid)") {
+        $detailParts += "adjusts CSS properties"
+    }
+    elseif ($addedLines -match "(onClick|onChange|onSubmit)") {
+        $detailParts += "adds event handlers"
+    }
+    elseif ($addedLines -match "(\/\/|#|\/\*)") {
+        $detailParts += "adds comments"
+    }
+}
+
+$detailDesc = if ($detailParts.Count -gt 0) { $detailParts -join " and " } else { $desc }
+
 # --- Gitmoji mapping (Unicode for PS 5.1) ---
 $gitmoji = @{}
 $gitmoji["feat"]     = [char]::ConvertFromUtf32(0x2728)
@@ -442,15 +509,23 @@ $gitmoji["ci"]       = [char]::ConvertFromUtf32(0x1F477)
 $gitmoji["chore"]    = [char]::ConvertFromUtf32(0x1F528)
 $gitmoji["revert"]   = [char]::ConvertFromUtf32(0x23EA)
 
-# --- Build both versions ---
+# --- Build both versions (simple + detailed) ---
 $emoji = $gitmoji[$type]
 
 if ($scope) {
-    $withEmoji    = "$emoji ${type}(${scope}): $desc"
-    $withoutEmoji = "${type}(${scope}): $desc"
+    # Simple version
+    $simpleWithEmoji    = "$emoji ${type}(${scope}): $desc"
+    $simpleWithoutEmoji = "${type}(${scope}): $desc"
+    # Detailed version
+    $detailWithEmoji    = "$emoji ${type}(${scope}): $detailDesc"
+    $detailWithoutEmoji = "${type}(${scope}): $detailDesc"
 } else {
-    $withEmoji    = "$emoji ${type}: $desc"
-    $withoutEmoji = "${type}: $desc"
+    # Simple version
+    $simpleWithEmoji    = "$emoji ${type}: $desc"
+    $simpleWithoutEmoji = "${type}: $desc"
+    # Detailed version
+    $detailWithEmoji    = "$emoji ${type}: $detailDesc"
+    $detailWithoutEmoji = "${type}: $detailDesc"
 }
 
 # --- Enforce <=50 chars on summary (trim if needed) ---
@@ -462,13 +537,19 @@ function Truncate-Msg {
 }
 
 # --- Output ---
-Write-Host "=== Suggested messages ===" -ForegroundColor Green
+Write-Host "=== Simple (short) ===" -ForegroundColor Green
 Write-Host ""
-Write-Host "  WITH emoji:    " -NoNewline; Write-Host $withEmoji -ForegroundColor White
-Write-Host "  WITHOUT emoji: " -NoNewline; Write-Host $withoutEmoji -ForegroundColor White
+Write-Host "  $simpleWithEmoji" -ForegroundColor White
+Write-Host "  $simpleWithoutEmoji" -ForegroundColor DarkGray
+Write-Host ""
+
+Write-Host "=== Detailed (specific) ===" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  $detailWithEmoji" -ForegroundColor White
+Write-Host "  $detailWithoutEmoji" -ForegroundColor DarkGray
 Write-Host ""
 
 Write-Host "--- Copy ---" -ForegroundColor DarkGray
-Write-Host "  git commit -m `"$withEmoji`"" -ForegroundColor DarkCyan
-Write-Host "  git commit -m `"$withoutEmoji`"" -ForegroundColor DarkGray
+Write-Host "  git commit -m `"$simpleWithEmoji`"" -ForegroundColor DarkCyan
+Write-Host "  git commit -m `"$detailWithEmoji`"" -ForegroundColor DarkCyan
 Write-Host ""
