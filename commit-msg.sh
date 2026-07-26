@@ -123,6 +123,30 @@ get_scope() {
     fi
 }
 
+# --- Auto-scope from branch name ---
+get_branch_scope() {
+    local branch
+    branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+    [[ -z "$branch" ]] && return
+
+    local ignored=("main" "master" "develop" "dev" "staging" "production" "release")
+    for i in "${ignored[@]}"; do
+        [[ "$branch" == "$i" ]] && return
+    done
+
+    if [[ "$branch" =~ /(.+) ]]; then
+        local scope="${BASH_REMATCH[1]}"
+        local prefixes=("feature/" "bugfix/" "hotfix/" "fix/" "chore/" "docs/" "test/" "refactor/" "perf/" "release/")
+        for p in "${prefixes[@]}"; do
+            if [[ "$scope" =~ ^${p}(.+)$ ]]; then
+                scope="${BASH_REMATCH[1]}"
+                break
+            fi
+        done
+        echo "$scope"
+    fi
+}
+
 # --- File type detection ---
 is_test_file() {
     [[ "$1" =~ (test|spec|\.test\.|\.spec\.) ]]
@@ -363,6 +387,9 @@ fi
 
 # --- Get scope ---
 SCOPE=$(get_scope "${ALL_FILES[@]}")
+if [[ -z "$SCOPE" ]]; then
+    SCOPE=$(get_branch_scope)
+fi
 
 # --- Gitmoji mapping ---
 declare -A GITMOJI
