@@ -93,6 +93,9 @@ git add .  # or selectively add files
 | Command | Description |
 |---|---|
 | `.\commit-msg.ps1` | Generate commit message and commit interactively |
+| `.\changelog.ps1` | Generate CHANGELOG.md from commit history |
+| `.\changelog.ps1 -SinceTag` | Generate only since last tag |
+| `.\changelog.ps1 -Limit 100` | Limit to last 100 commits |
 
 ## Architecture
 
@@ -247,6 +250,57 @@ The script analyzes the **actual diff content** to generate precise descriptions
 # Output: ♻️ refactor: adds formatPrice and removes legacy calculation from utils.js
 ```
 
+## Changelog Generator
+
+Generate a `CHANGELOG.md` from your commit history.
+
+### Usage
+
+```powershell
+# Generate from last 50 commits
+.\changelog.ps1
+
+# Generate only since last tag
+.\changelog.ps1 -SinceTag
+
+# Limit to last 100 commits
+.\changelog.ps1 -Limit 100
+```
+
+### Output Example
+
+```markdown
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+
+## [1.2.0] 2026-07-26
+
+### Features
+
+- **auth:** adds Login component (`a1b2c3d`)
+- **api:** adds user endpoint (`e4f5g6h`)
+
+### Bug Fixes
+
+- **auth:** fixes token refresh (`i7j8k9l`)
+- fixes typo in README (`m0n1o2p`)
+
+### Performance
+
+- **api:** adds caching for user queries (`q3r4s5t`)
+```
+
+### Version Bumping
+
+| Commit Type | Version Bump | Example |
+|---|---|---|
+| `fix: ...` | PATCH | `1.2.0` → `1.2.1` |
+| `feat: ...` | MINOR | `1.2.0` → `1.3.0` |
+| `feat!:` or `BREAKING CHANGE:` | MAJOR | `1.2.0` → `2.0.0` |
+
 ## Tech Stack
 
 | Component | Technology |
@@ -261,7 +315,11 @@ The script analyzes the **actual diff content** to generate precise descriptions
 
 ```
 GitWhisper/
-├── commit-msg.ps1          # Main script
+├── commit-msg.ps1          # Main script (Windows)
+├── commit-msg.sh           # Main script (Linux/Mac)
+├── changelog.ps1           # Changelog generator (Windows)
+├── changelog.sh            # Changelog generator (Linux/Mac)
+├── logo.png                # Project logo
 └── README.md               # This file
 ```
 
