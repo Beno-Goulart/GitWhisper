@@ -263,44 +263,71 @@ fi
 # --- Build specific description ---
 SPECIFIC_PARTS=()
 
-# Check for imports
-if echo "$ADDED_LINES" | grep -qE '(import|require)'; then
+# --- 1. Detect new parameters/flags (highest value signal) ---
+NEW_BASH_FLAGS=$(echo "$ADDED_LINES" | grep -oE '"--?[a-z]+"' | grep -oE '[a-z]+' | grep -vE '^(y|n|yes|no)$' | head -3 | tr '\n' ', ' | sed 's/,$//')
+[[ -n "$NEW_BASH_FLAGS" ]] && SPECIFIC_PARTS+=("adds --$NEW_BASH_FLAGS option")
+
+# --- 2. Detect new function definitions ---
+BASH_FUNCS=$(echo "$ADDED_LINES" | grep -oE '[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)\s*\{' | grep -oE '^[a-zA-Z_]+' | grep -vE '^(contains_pattern|count_matches)$' | head -3 | tr '\n' ', ' | sed 's/,$//')
+[[ -n "$BASH_FUNCS" ]] && SPECIFIC_PARTS+=("adds $BASH_FUNCS function")
+
+# --- 3. Detect git operations in new code ---
+GIT_OPS=$(echo "$ADDED_LINES" | grep -oE 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | grep -oE '(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | head -3 | tr '\n' ', ' | sed 's/,$//')
+[[ -n "$GIT_OPS" ]] && SPECIFIC_PARTS+=("adds git $GIT_OPS")
+
+# --- 4. Detect echo with key messages ---
+ECHO_MSGS=$(echo "$ADDED_LINES" | grep -oE 'echo -e?\s+"[^"]{5,50}"' | grep -oE '"[^"]*"' | tr -d '"' | grep -vE '^(Error|Warning|Pushing|Committing|Select|Cancel|Changes|===)' | head -2 | tr '\n' ', ' | sed 's/,$//')
+[[ -n "$ECHO_MSGS" ]] && SPECIFIC_PARTS+=("adds $ECHO_MSGS messages")
+
+# --- 5. Detect imports, classes, hooks, routes ---
+if echo "$ADDED_LINES" | grep -qE '(import|require)\s*\{?\s*[A-Za-z]'; then
     IMPORT_NAMES=$(echo "$ADDED_LINES" | grep -oE '(import|require)\s*\{?\s*[A-Za-z]+' | grep -oE '[A-Za-z]+$' | head -3 | tr '\n' ', ' | sed 's/,$//')
     [[ -n "$IMPORT_NAMES" ]] && SPECIFIC_PARTS+=("adds $IMPORT_NAMES import")
 fi
 
-# Check for functions
-if echo "$ADDED_LINES" | grep -qE '(function|const|let|var)\s+[A-Za-z]'; then
-    FUNC_NAMES=$(echo "$ADDED_LINES" | grep -oE '(function|const|let|var)\s+[A-Za-z]+' | grep -oE '[A-Za-z]+$' | grep -vE '^(module|exports|require|import)$' | head -2 | tr '\n' ', ' | sed 's/,$//')
-    [[ -n "$FUNC_NAMES" ]] && SPECIFIC_PARTS+=("adds $FUNC_NAMES")
-fi
-
-# Check for classes
 if echo "$ADDED_LINES" | grep -qE 'class\s+[A-Za-z]'; then
     CLASS_NAMES=$(echo "$ADDED_LINES" | grep -oE 'class\s+[A-Za-z]+' | grep -oE '[A-Za-z]+$' | head -2 | tr '\n' ', ' | sed 's/,$//')
     [[ -n "$CLASS_NAMES" ]] && SPECIFIC_PARTS+=("adds $CLASS_NAMES class")
 fi
 
-# Check for React hooks
 if echo "$ADDED_LINES" | grep -qE '(useState|useEffect|useContext|useReducer|useMemo|useCallback|useRef)\s*\('; then
     HOOK_NAMES=$(echo "$ADDED_LINES" | grep -oE '[a-zA-Z]+\((' | grep -oE '^[a-zA-Z]+' | grep -E '^use' | head -3 | tr '\n' ', ' | sed 's/,$//')
     [[ -n "$HOOK_NAMES" ]] && SPECIFIC_PARTS+=("adds $HOOK_NAMES")
 fi
 
-# Fallback patterns
+# --- 6. Fallback: describe file change mix ---
 if [[ ${#SPECIFIC_PARTS[@]} -eq 0 ]]; then
-    if echo "$ADDED_LINES" | grep -qE '(try|catch|throw|Error)'; then
-        SPECIFIC_PARTS+=("adds error handling")
-    elif echo "$ADDED_LINES" | grep -qE '(fetch|axios|http|api|endpoint)'; then
-        SPECIFIC_PARTS+=("adds API call")
-    elif echo "$ADDED_LINES" | grep -qE '(className|class=|style=)'; then
-        SPECIFIC_PARTS+=("updates styles")
-    elif echo "$ADDED_LINES" | grep -qE '(margin|padding|border|color|font|display|flex|grid)'; then
-        SPECIFIC_PARTS+=("adjusts CSS properties")
-    elif echo "$ADDED_LINES" | grep -qE '(onClick|onChange|onSubmit)'; then
-        SPECIFIC_PARTS+=("adds event handlers")
-    elif echo "$ADDED_LINES" | grep -qE '(\/\/|#|\/\*)'; then
-        SPECIFIC_PARTS+=("adds comments")
+    SCRIPT_FILES=()
+    DOC_FILES=()
+    OTHER_FILES=()
+
+    for f in "${ADDED[@]}" "${MODIFIED[@]}"; do
+        [[ -z "$f" ]] && continue
+        BASENAME=$(basename "$f" | sed 's/\.[^.]*$//')
+        LOWER=$(echo "$f" | tr '[:upper:]' '[:lower:]')
+        if [[ "$LOWER" =~ \.(sh|ps1|py|rb|js|ts)$ || "$LOWER" =~ commit-msg|changelog ]]; then
+            SCRIPT_FILES+=("$BASENAME")
+        elif [[ "$LOWER" =~ \.(md|mdx|rst|txt)$ || "$LOWER" =~ readme|changelog|contributing|license ]]; then
+            DOC_FILES+=("$BASENAME")
+        else
+            OTHER_FILES+=("$BASENAME")
+        fi
+    done
+
+    MIX_PARTS=()
+    [[ ${#SCRIPT_FILES[@]} -gt 0 ]] && MIX_PARTS+=("scripts ($(IFS=', '; echo "${SCRIPT_FILES[*]:0:3}"))")
+    [[ ${#DOC_FILES[@]} -gt 0 ]] && MIX_PARTS+=("docs ($(IFS=', '; echo "${DOC_FILES[*]:0:3}"))")
+    [[ ${#OTHER_FILES[@]} -gt 0 ]] && MIX_PARTS+=("$(IFS=', '; echo "${OTHER_FILES[*]:0:3}")")
+
+    if [[ ${#MIX_PARTS[@]} -gt 0 ]]; then
+        SPECIFIC_PARTS+=("updates $(IFS=' and '; echo "${MIX_PARTS[*]}")")
+    elif [[ ${#DELETED[@]} -gt 0 ]]; then
+        DEL_NAMES=""
+        for f in "${DELETED[@]:0:2}"; do
+            [[ -n "$DEL_NAMES" ]] && DEL_NAMES+=", "
+            DEL_NAMES+="$(basename "$f")"
+        done
+        SPECIFIC_PARTS+=("removes $DEL_NAMES")
     fi
 fi
 

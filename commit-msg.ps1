@@ -499,20 +499,58 @@ $desc = $result.Desc
 
 # --- Build detailed description from diff content ---
 $addedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^\+[^+]" }) -join "`n"
+$removedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^-[^-]" }) -join "`n"
 
 $detailParts = @()
 
-# Extract meaningful items for detailed version
+# --- 1. Detect new parameters/flags (highest value signal) ---
+$newParams = [regex]::Matches($addedLines, 'param\(\s*\[.*?\]\s*\$+(\w+)')
+if ($newParams.Count -gt 0) {
+    $names = ($newParams | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+    $detailParts += "adds -$names parameter"
+}
+
+# Detect bash flags like "--undo" or "-u"
+$newBashFlags = [regex]::Matches($addedLines, '"--?(\w+)"')
+if ($newBashFlags.Count -gt 0) {
+    $names = ($newBashFlags | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(y|n|yes|no)$" } | Select-Object -Unique) -join ", "
+    if ($names) { $detailParts += "adds --$names flag" }
+}
+
+# --- 2. Detect new function definitions ---
+# PowerShell functions
+$addedFuncs = [regex]::Matches($addedLines, 'function\s+([\w-]+)\s*\{')
+if ($addedFuncs.Count -gt 0) {
+    $names = ($addedFuncs | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+    if ($names) { $detailParts += "adds $names function" }
+}
+
+# Bash functions
+$addedBashFuncs = [regex]::Matches($addedLines, '([\w_]+)\s*\(\)\s*\{')
+if ($addedBashFuncs.Count -gt 0) {
+    $names = ($addedBashFuncs | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(contains_pattern|count_matches)$" } | Select-Object -Unique | Select-Object -First 3) -join ", "
+    if ($names) { $detailParts += "adds $names function" }
+}
+
+# --- 3. Detect git operations in new code ---
+$gitOps = [regex]::Matches($addedLines, 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)')
+if ($gitOps.Count -gt 0) {
+    $ops = ($gitOps | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+    $detailParts += "adds git $ops"
+}
+
+# --- 4. Detect write/host or echo with key messages ---
+$writeHost = [regex]::Matches($addedLines, 'Write-Host\s+"([^"]{5,50})"')
+if ($writeHost.Count -gt 0) {
+    $msgs = ($writeHost | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(Error|Warning|Pushing|Committing|Select|Cancel)" } | Select-Object -Unique | Select-Object -First 2) -join ", "
+    if ($msgs) { $detailParts += "adds $msgs messages" }
+}
+
+# --- 5. Detect imports, classes, hooks, routes (for code projects) ---
 $addedImports = [regex]::Matches($addedLines, "(?:import|require)\s*\{?\s*([\w]+)")
 if ($addedImports.Count -gt 0) {
     $names = ($addedImports | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
     $detailParts += "adds $names import"
-}
-
-$addedFunctions = [regex]::Matches($addedLines, "(?:function|const|let|var)\s+(\w+)")
-if ($addedFunctions.Count -gt 0) {
-    $names = ($addedFunctions | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(module|exports|require|import)$" } | Select-Object -Unique | Select-Object -First 2) -join ", "
-    if ($names) { $detailParts += "adds $names" }
 }
 
 $addedClasses = [regex]::Matches($addedLines, "(?:class)\s+(\w+)")
@@ -533,35 +571,47 @@ if ($addedHooks.Count -gt 0) {
     if ($hookNames) { $detailParts += "adds $hookNames" }
 }
 
-$addedEvents = [regex]::Matches($addedLines, "(?:addEventListener|\.on\(\s*['""])(\w+)")
-if ($addedEvents.Count -gt 0) {
-    $names = ($addedEvents | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
-    $detailParts += "adds $names listener"
-}
-
-# Fallback patterns for detailed version
+# --- 6. Fallback: describe file change mix ---
 if ($detailParts.Count -eq 0) {
-    if ($addedLines -match "(try|catch|throw|Error)") {
-        $detailParts += "adds error handling"
+    # Categorize changed files
+    $scriptFiles = @()
+    $docFiles = @()
+    $configFiles = @()
+    $otherFiles = @()
+
+    foreach ($f in ($added + $modified)) {
+        $ext = [System.IO.Path]::GetExtension($f).ToLower()
+        $name = [System.IO.Path]::GetFileName($f).ToLower()
+        if ($ext -match "\.(ps1|sh|py|rb|js|ts)$" -or $name -match "commit-msg|changelog") {
+            $scriptFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+        }
+        elseif ($ext -match "\.(md|mdx|rst|txt)$" -or $name -match "readme|changelog|contributing|license") {
+            $docFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+        }
+        elseif ($name -match "(package\.json|dockerfile|makefile|\.gitignore|\.editorconfig|tsconfig)") {
+            $configFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+        }
+        else {
+            $otherFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+        }
     }
-    elseif ($addedLines -match "(fetch|axios|http|api|endpoint)") {
-        $detailParts += "adds API call"
+
+    $mixParts = @()
+    if ($scriptFiles.Count -gt 0) { $mixParts += "scripts ($($scriptFiles -join ', '))" }
+    if ($docFiles.Count -gt 0) { $mixParts += "docs ($($docFiles -join ', '))" }
+    if ($configFiles.Count -gt 0) { $mixParts += "config ($($configFiles -join ', '))" }
+    if ($otherFiles.Count -gt 0) { $mixParts += ($otherFiles | Select-Object -First 3) -join ", " }
+
+    if ($mixParts.Count -gt 0) {
+        $detailParts += "updates $($mixParts -join ' and ')"
     }
-    elseif ($addedLines -match "(className|class=|style=)") {
-        $detailParts += "updates styles"
-    }
-    elseif ($addedLines -match "(margin|padding|border|color|font|display|flex|grid)") {
-        $detailParts += "adjusts CSS properties"
-    }
-    elseif ($addedLines -match "(onClick|onChange|onSubmit)") {
-        $detailParts += "adds event handlers"
-    }
-    elseif ($addedLines -match "(\/\/|#|\/\*)") {
-        $detailParts += "adds comments"
+    elseif ($Deleted.Count -gt 0) {
+        $delNames = ($Deleted | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Select-Object -First 2) -join ", "
+        $detailParts += "removes $delNames"
     }
 }
 
-$detailDesc = if ($detailParts.Count -gt 0) { $detailParts -join " and " } else { $desc }
+$detailDesc = $detailParts -join " and "
 
 # --- Gitmoji mapping (Unicode for PS 5.1) ---
 $gitmoji = @{}
