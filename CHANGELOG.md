@@ -3,7 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
-## [0.1.1](2026-07-26)
+## [0.2.0](2026-07-27)
+
+### Features
+
+- **install:** adds msg, undo, changelog function (a5fa32b)
+- **install:** adds commit-msg, commit-msg-undo, changelog function and adds GitWhisper is already installed in your profile., Restart your terminal or run: . `$PROFILE messages (62fd7bc)
 
 ### Bug Fixes
 
@@ -11,6 +16,8 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 
 ### Refactoring
 
+- **auth:** adds --undo, u flag and adds s import (9267082)
+- **auth:** updates 4 files in CHANGELOG, README (36abe1f)
 - **auth:** adds Get (b91f4e3)
 - adds error handling (bdcfa96)
 - adds error handling (f35e2ce)
@@ -20,6 +27,7 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 
 ### Documentation
 
+- **README:** adds git pull (f4a0993)
 - **README:** updates README.md (21d9d85)
 - **README:** updates README.md (3e666f8)
 
