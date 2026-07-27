@@ -29,7 +29,7 @@ GitWhisper is a cross-platform tool that analyzes your `git diff` and auto-gener
 ## Preview
 
 ```
-PS C:\MyProject> .\commit-msg.ps1
+PS C:\MyProject> commit-msg
 
 === Changes detected ===
 
@@ -70,51 +70,53 @@ PS C:\MyProject> .\commit-msg.ps1
 
 ## Quick Start
 
-### 1. Copy the script
+### 1. Install globally
+
+Clone the repository and run the install script. This adds functions to your shell profile so you can use GitWhisper from **any project** without copying scripts.
 
 **Windows (PowerShell):**
 
 ```powershell
-Copy-Item "commit-msg.ps1" -Destination "C:\MyProject\"
+git clone https://github.com/youruser/GitWhisper.git
+cd GitWhisper
+.\install.ps1
 ```
 
 **Linux / macOS (Bash):**
 
 ```bash
-cp commit-msg.sh /path/to/MyProject/
-chmod +x commit-msg.sh
+git clone https://github.com/youruser/GitWhisper.git
+cd GitWhisper
+chmod +x install.sh
+./install.sh
 ```
 
-### 2. Stage your changes
+Restart your terminal after installation.
 
-**Windows:**
+### 2. Use in any project
 
 ```powershell
 cd C:\MyProject
-git add .  # or selectively add files
-```
-
-**Linux / macOS:**
-
-```bash
-cd /path/to/MyProject
 git add .
+commit-msg
+# Select 1-4, then confirm push
 ```
 
-### 3. Run the script and choose
+> **Note:** Install once, use everywhere. Run `git pull` in the GitWhisper folder to get updates — no reinstall needed.
 
-**Windows:**
+### Alternative: Copy to project
+
+If you prefer not to install globally, you can copy the script directly into your project:
 
 ```powershell
+# Windows
+Copy-Item "commit-msg.ps1" -Destination "C:\MyProject\"
 .\commit-msg.ps1
-# Select 1-4, then confirm push
-```
 
-**Linux / macOS:**
-
-```bash
+# Linux/macOS
+cp commit-msg.sh /path/to/MyProject/
+chmod +x commit-msg.sh
 ./commit-msg.sh
-# Select 1-4, then confirm push
 ```
 
 ## Undo Last Commit
@@ -124,15 +126,15 @@ Quickly undo the last commit with a simple interactive menu.
 ### PowerShell
 
 ```powershell
-.\commit-msg.ps1 -Undo
+commit-msg-undo          # if installed globally
+.\commit-msg.ps1 -Undo   # if running directly
 ```
 
 ### Bash
 
 ```bash
-./commit-msg.sh --undo
-# or
-./commit-msg.sh -u
+commit-msg-undo            # if installed globally
+./commit-msg.sh --undo     # if running directly
 ```
 
 ### Reset Options
@@ -157,6 +159,16 @@ Quickly undo the last commit with a simple interactive menu.
 ```
 
 ## Commands
+
+### Global functions (after install)
+
+| Command | Description |
+|---|---|
+| `commit-msg` | Generate commit message and commit interactively |
+| `commit-msg-undo` | Undo last commit (soft or mixed reset) |
+| `changelog` | Generate CHANGELOG.md from commit history |
+
+### Direct script usage
 
 | Command | Description |
 |---|---|
@@ -287,35 +299,35 @@ The script analyzes the **actual diff content** to generate precise descriptions
 ### Adding a new component
 
 ```powershell
-.\commit-msg.ps1
+commit-msg
 # Output: ✨ feat(auth): adds Login component in auth.js
 ```
 
 ### Fixing a bug
 
 ```powershell
-.\commit-msg.ps1 -Staged
+commit-msg
 # Output: 🐛 fix(api): adds error handling in user.js
 ```
 
 ### Updating dependencies
 
 ```powershell
-.\commit-msg.ps1
+commit-msg
 # Output: 🔧 build: updates axios dependency
 ```
 
 ### Adding tests
 
 ```powershell
-.\commit-msg.ps1
+commit-msg
 # Output: ✅ test: adds formatCurrency test for utils.test.js
 ```
 
 ### Refactoring with mixed changes
 
 ```powershell
-.\commit-msg.ps1
+commit-msg
 # Output: ♻️ refactor: adds formatPrice and removes legacy calculation from utils.js
 ```
 
@@ -326,13 +338,14 @@ Generate a `CHANGELOG.md` from your commit history.
 ### Usage
 
 ```powershell
-# Generate from last 50 commits
+# If installed globally
+changelog
+changelog -SinceTag
+changelog -Limit 100
+
+# If running directly
 .\changelog.ps1
-
-# Generate only since last tag
 .\changelog.ps1 -SinceTag
-
-# Limit to last 100 commits
 .\changelog.ps1 -Limit 100
 ```
 
@@ -388,6 +401,8 @@ GitWhisper/
 ├── commit-msg.sh           # Main script (Linux/Mac)
 ├── changelog.ps1           # Changelog generator (Windows)
 ├── changelog.sh            # Changelog generator (Linux/Mac)
+├── install.ps1             # Global install for PowerShell
+├── install.sh              # Global install for Bash/Zsh
 ├── logo.png                # Project logo
 └── README.md               # This file
 ```
