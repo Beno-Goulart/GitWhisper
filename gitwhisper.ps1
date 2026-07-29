@@ -311,34 +311,46 @@ function Invoke-Commit {
     Write-Host ""
     Write-Host "  Committing: $selectedMsg" -ForegroundColor Cyan
 
-    Write-Host ""
-    Write-Host "  Extended description (press Enter to skip, type ':q' to finish):" -ForegroundColor DarkGray
-    $bodyLines = @()
-    while ($true) {
-        $line = Read-Host "  "
-        if (-not $line) { break }
-        if ($line -eq ":q") { break }
-        $bodyLines += $line
+    $bodyParts = @()
+    if ($added.Count -gt 0) {
+        $bodyParts += "Added:"
+        $added | ForEach-Object { $bodyParts += "  - $_" }
+    }
+    if ($modified.Count -gt 0) {
+        $bodyParts += "Modified:"
+        $modified | ForEach-Object { $bodyParts += "  - $_" }
+    }
+    if ($deleted.Count -gt 0) {
+        $bodyParts += "Removed:"
+        $deleted | ForEach-Object { $bodyParts += "  - $_" }
+    }
+    $bodyParts += ""
+    $bodyParts += "Change summary: $desc"
+    if ($detailDesc -and $detailDesc -ne $desc) {
+        $bodyParts += "Details: $detailDesc"
     }
 
+    Write-Host ""
+    Write-Host "  Body:" -ForegroundColor Cyan
+    foreach ($bl in $bodyParts) {
+        Write-Host "    $bl"
+    }
+    Write-Host ""
+
     if ($DryRun) {
-        Write-Host ""
         Write-Host "  [DRY-RUN] Commit skipped." -ForegroundColor DarkGray
-        if ($bodyLines.Count -gt 0) {
-            Write-Host "  Body:" -ForegroundColor DarkGray
-            foreach ($bl in $bodyLines) {
-                Write-Host "    $bl" -ForegroundColor DarkGray
-            }
-        }
         return
     }
 
-    if ($bodyLines.Count -gt 0) {
-        $body = $bodyLines -join "`n"
-        git commit -m "$selectedMsg" -m "$body"
-    } else {
-        git commit -m "$selectedMsg"
+    $confirm = Read-Host "  Proceed with commit? (y/n)"
+    if ($confirm -ne "y" -and $confirm -ne "Y") {
+        Write-Host ""
+        Write-Host "  Cancelled." -ForegroundColor Yellow
+        exit 0
     }
+
+    $body = $bodyParts -join "`n"
+    git commit -m "$selectedMsg" -m "$body"
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""

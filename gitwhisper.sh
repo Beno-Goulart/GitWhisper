@@ -548,38 +548,52 @@ invoke_commit() {
     echo ""
     echo -e "  \033[36mCommitting: $SELECTED_MSG\033[0m"
 
+    BODY_PARTS=()
+    if [[ ${#ADDED[@]} -gt 0 ]]; then
+        BODY_PARTS+=("Added:")
+        for f in "${ADDED[@]}"; do
+            BODY_PARTS+=("  - $f")
+        done
+    fi
+    if [[ ${#MODIFIED[@]} -gt 0 ]]; then
+        BODY_PARTS+=("Modified:")
+        for f in "${MODIFIED[@]}"; do
+            BODY_PARTS+=("  - $f")
+        done
+    fi
+    if [[ ${#DELETED[@]} -gt 0 ]]; then
+        BODY_PARTS+=("Removed:")
+        for f in "${DELETED[@]}"; do
+            BODY_PARTS+=("  - $f")
+        done
+    fi
+    BODY_PARTS+=("")
+    BODY_PARTS+=("Change summary: $COMMIT_DESC")
+    if [[ -n "$SPECIFIC_DESC" && "$SPECIFIC_DESC" != "$COMMIT_DESC" ]]; then
+        BODY_PARTS+=("Details: $SPECIFIC_DESC")
+    fi
+
     echo ""
-    echo -e "  \033[90mExtended description (press Enter to skip, type ':q' to finish):\033[0m"
-    BODY_LINES=()
-    while true; do
-        read -r LINE
-        if [[ -z "$LINE" ]]; then
-            break
-        fi
-        if [[ "$LINE" == ":q" ]]; then
-            break
-        fi
-        BODY_LINES+=("$LINE")
+    echo -e "  \033[36mBody:\033[0m"
+    for bl in "${BODY_PARTS[@]}"; do
+        echo "    $bl"
     done
+    echo ""
 
     if [[ "$DRY_RUN" == true ]]; then
-        echo ""
         echo -e "  \033[90m[DRY-RUN] Commit skipped.\033[0m"
-        if [[ ${#BODY_LINES[@]} -gt 0 ]]; then
-            echo -e "  \033[90mBody:\033[0m"
-            for bl in "${BODY_LINES[@]}"; do
-                echo -e "  \033[90m    $bl\033[0m"
-            done
-        fi
         return
     fi
 
-    if [[ ${#BODY_LINES[@]} -gt 0 ]]; then
-        BODY=$(printf '%s\n' "${BODY_LINES[@]}")
-        git commit -m "$SELECTED_MSG" -m "$BODY"
-    else
-        git commit -m "$SELECTED_MSG"
+    read -p "  Proceed with commit? (y/n): " CONFIRM
+    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+        echo ""
+        echo -e "  \033[33mCancelled.\033[0m"
+        exit 0
     fi
+
+    BODY=$(printf '%s\n' "${BODY_PARTS[@]}")
+    git commit -m "$SELECTED_MSG" -m "$BODY"
 
     if [[ $? -eq 0 ]]; then
         echo ""
