@@ -12,14 +12,21 @@ show_help() {
     echo "    gitwhisper undo          - undo last commit"
     echo "    gitwhisper changelog     - generate changelog"
     echo "    gitwhisper help          - show this help"
+    echo "    gitwhisper --dry-run     - show message without committing"
     echo ""
     exit 0
 }
 
+DRY_RUN=false
 CMD="${1:-}"
 
 if [ "$CMD" = "help" ] || [ "$CMD" = "--help" ] || [ "$CMD" = "-h" ]; then
     show_help
+fi
+
+if [ "$CMD" = "--dry-run" ] || [ "$CMD" = "-n" ]; then
+    DRY_RUN=true
+    CMD=""
 fi
 
 if [[ ! -d ".git" ]]; then
@@ -540,6 +547,13 @@ invoke_commit() {
 
     echo ""
     echo -e "  \033[36mCommitting: $SELECTED_MSG\033[0m"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo ""
+        echo -e "  \033[90m[DRY-RUN] Commit skipped.\033[0m"
+        return
+    fi
+
     git commit -m "$SELECTED_MSG"
 
     if [[ $? -eq 0 ]]; then

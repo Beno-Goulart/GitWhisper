@@ -3,7 +3,8 @@ param(
     [switch]$Help,
     [switch]$Undo,
     [switch]$SinceTag,
-    [int]$Limit = 50
+    [int]$Limit = 50,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,7 @@ function Show-Help {
     Write-Host "    gitwhisper undo          - undo last commit" -ForegroundColor Cyan
     Write-Host "    gitwhisper changelog     - generate changelog" -ForegroundColor Cyan
     Write-Host "    gitwhisper help          - show this help" -ForegroundColor Cyan
+    Write-Host "    gitwhisper --dry-run     - show message without committing" -ForegroundColor Cyan
     Write-Host ""
     exit 0
 }
@@ -303,6 +305,13 @@ function Invoke-Commit {
 
     Write-Host ""
     Write-Host "  Committing: $selectedMsg" -ForegroundColor Cyan
+
+    if ($DryRun) {
+        Write-Host ""
+        Write-Host "  [DRY-RUN] Commit skipped." -ForegroundColor DarkGray
+        return
+    }
+
     git commit -m "$selectedMsg"
 
     if ($LASTEXITCODE -eq 0) {
