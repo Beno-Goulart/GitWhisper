@@ -548,13 +548,38 @@ invoke_commit() {
     echo ""
     echo -e "  \033[36mCommitting: $SELECTED_MSG\033[0m"
 
+    echo ""
+    echo -e "  \033[90mExtended description (press Enter to skip, type ':q' to finish):\033[0m"
+    BODY_LINES=()
+    while true; do
+        read -r LINE
+        if [[ -z "$LINE" ]]; then
+            break
+        fi
+        if [[ "$LINE" == ":q" ]]; then
+            break
+        fi
+        BODY_LINES+=("$LINE")
+    done
+
     if [[ "$DRY_RUN" == true ]]; then
         echo ""
         echo -e "  \033[90m[DRY-RUN] Commit skipped.\033[0m"
+        if [[ ${#BODY_LINES[@]} -gt 0 ]]; then
+            echo -e "  \033[90mBody:\033[0m"
+            for bl in "${BODY_LINES[@]}"; do
+                echo -e "  \033[90m    $bl\033[0m"
+            done
+        fi
         return
     fi
 
-    git commit -m "$SELECTED_MSG"
+    if [[ ${#BODY_LINES[@]} -gt 0 ]]; then
+        BODY=$(printf '%s\n' "${BODY_LINES[@]}")
+        git commit -m "$SELECTED_MSG" -m "$BODY"
+    else
+        git commit -m "$SELECTED_MSG"
+    fi
 
     if [[ $? -eq 0 ]]; then
         echo ""

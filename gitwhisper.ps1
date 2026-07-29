@@ -24,6 +24,11 @@ function Show-Help {
     exit 0
 }
 
+if ($DryRun -or $Command -eq "--dry-run" -or $Command -eq "-n") {
+    $DryRun = $true
+    $Command = ""
+}
+
 if ($Help -or $Command -eq "help" -or $Command -eq "--help" -or $Command -eq "-h") {
     Show-Help
 }
@@ -306,13 +311,34 @@ function Invoke-Commit {
     Write-Host ""
     Write-Host "  Committing: $selectedMsg" -ForegroundColor Cyan
 
+    Write-Host ""
+    Write-Host "  Extended description (press Enter to skip, type ':q' to finish):" -ForegroundColor DarkGray
+    $bodyLines = @()
+    while ($true) {
+        $line = Read-Host "  "
+        if (-not $line) { break }
+        if ($line -eq ":q") { break }
+        $bodyLines += $line
+    }
+
     if ($DryRun) {
         Write-Host ""
         Write-Host "  [DRY-RUN] Commit skipped." -ForegroundColor DarkGray
+        if ($bodyLines.Count -gt 0) {
+            Write-Host "  Body:" -ForegroundColor DarkGray
+            foreach ($bl in $bodyLines) {
+                Write-Host "    $bl" -ForegroundColor DarkGray
+            }
+        }
         return
     }
 
-    git commit -m "$selectedMsg"
+    if ($bodyLines.Count -gt 0) {
+        $body = $bodyLines -join "`n"
+        git commit -m "$selectedMsg" -m "$body"
+    } else {
+        git commit -m "$selectedMsg"
+    }
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
