@@ -2,8 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $gitWhisperDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-if (-not (Test-Path "$gitWhisperDir\commit-msg.ps1")) {
-    Write-Host "Error: commit-msg.ps1 not found in $gitWhisperDir" -ForegroundColor Red
+if (-not (Test-Path "$gitWhisperDir\gitwhisper.ps1")) {
+    Write-Host "Error: gitwhisper.ps1 not found in $gitWhisperDir" -ForegroundColor Red
     exit 1
 }
 
@@ -30,9 +30,7 @@ if ($existing -and $existing.Contains($marker)) {
 $block = @"
 
 $marker
-function commit-msg { & "$gitWhisperDir\commit-msg.ps1" @args }
-function commit-msg-undo { & "$gitWhisperDir\commit-msg.ps1" -Undo }
-function changelog { & "$gitWhisperDir\changelog.ps1" @args }
+function gitwhisper { & "$gitWhisperDir\gitwhisper.ps1" @args }
 # <<< GitWhisper <<<
 "@
 
@@ -45,13 +43,10 @@ Write-Host "  Functions added to:" -ForegroundColor White
 Write-Host "  $profilePath" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  Available commands:" -ForegroundColor White
-Write-Host "    commit-msg        " -ForegroundColor Cyan -NoNewline
-Write-Host "- generate commit message" -ForegroundColor DarkGray
-Write-Host "    commit-msg-undo   " -ForegroundColor Cyan -NoNewline
-Write-Host "- undo last commit" -ForegroundColor DarkGray
-Write-Host "    changelog         " -ForegroundColor Cyan -NoNewline
-Write-Host "- generate changelog" -ForegroundColor DarkGray
+Write-Host "    gitwhisper            " -ForegroundColor Cyan -NoNewline
+Write-Host "- unified command (commit, undo, changelog)" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  Usage: gitwhisper [commit|undo|changelog|help]" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Restart your terminal or run:" -ForegroundColor Yellow
 Write-Host "    . `$PROFILE" -ForegroundColor White
-Write-Host ""

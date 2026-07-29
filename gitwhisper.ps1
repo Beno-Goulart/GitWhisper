@@ -1,14 +1,37 @@
-param([switch]$Undo)
+param(
+    [string]$Command = "",
+    [switch]$Help,
+    [switch]$Undo,
+    [switch]$SinceTag,
+    [int]$Limit = 50
+)
 
 $ErrorActionPreference = "Stop"
+
+function Show-Help {
+    Write-Host ""
+    Write-Host "=== GitWhisper ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Usage:" -ForegroundColor White
+    Write-Host "    gitwhisper               - generate commit message" -ForegroundColor Cyan
+    Write-Host "    gitwhisper commit        - generate commit message" -ForegroundColor Cyan
+    Write-Host "    gitwhisper undo          - undo last commit" -ForegroundColor Cyan
+    Write-Host "    gitwhisper changelog     - generate changelog" -ForegroundColor Cyan
+    Write-Host "    gitwhisper help          - show this help" -ForegroundColor Cyan
+    Write-Host ""
+    exit 0
+}
+
+if ($Help -or $Command -eq "help" -or $Command -eq "--help" -or $Command -eq "-h") {
+    Show-Help
+}
 
 if (-not (Test-Path ".git")) {
     Write-Host "Error: Not a git repository." -ForegroundColor Red
     exit 1
 }
 
-# --- Undo last commit ---
-if ($Undo) {
+function Invoke-Undo {
     $lastMsg = git log -1 --format="%s" 2>$null
     if (-not $lastMsg) {
         Write-Host "Nothing to undo." -ForegroundColor Yellow
@@ -53,48 +76,241 @@ if ($Undo) {
             Write-Host "  Cancelled." -ForegroundColor Yellow
         }
     }
-    exit 0
 }
 
-# Always use staged changes (git commit only commits what's staged)
-$diffIndex = git diff --staged --name-status
-$diffStat = git diff --staged --stat
-$diffContent = git diff --staged
+function Invoke-Commit {
+    $diffIndex = git diff --staged --name-status
+    $diffStat = git diff --staged --stat
+    $diffContent = git diff --staged
 
-if (-not $diffIndex) {
-    Write-Host "No changes found." -ForegroundColor Yellow
-    exit 0
-}
+    if (-not $diffIndex) {
+        Write-Host "No changes found." -ForegroundColor Yellow
+        exit 0
+    }
 
-Write-Host "`n=== Changes detected ===" -ForegroundColor Cyan
-Write-Host $diffStat
-Write-Host ""
+    Write-Host "`n=== Changes detected ===" -ForegroundColor Cyan
+    Write-Host $diffStat
+    Write-Host ""
 
-$lines = $diffIndex -split "`n"
+    $lines = $diffIndex -split "`n"
 
-$added    = @()
-$modified = @()
-$deleted  = @()
-$renamed  = @()
+    $added    = @()
+    $modified = @()
+    $deleted  = @()
+    $renamed  = @()
 
-foreach ($line in $lines) {
-    $parts = $line -split "`t"
-    $status = $parts[0].Trim()
-    $file   = $parts[-1].Trim()
+    foreach ($line in $lines) {
+        $parts = $line -split "`t"
+        $status = $parts[0].Trim()
+        $file   = $parts[-1].Trim()
 
-    switch -Regex ($status) {
-        "^A"  { $added += $file }
-        "^M"  { $modified += $file }
-        "^D"  { $deleted += $file }
-        "^R"  { $renamed += $file }
+        switch -Regex ($status) {
+            "^A"  { $added += $file }
+            "^M"  { $modified += $file }
+            "^D"  { $deleted += $file }
+            "^R"  { $renamed += $file }
+        }
+    }
+
+    $allFiles   = $added + $modified
+    $addedLower = $allFiles | ForEach-Object { $_.ToLower() }
+    $deletedLower = $deleted | ForEach-Object { $_.ToLower() }
+
+    $scope = Get-Scope -Files $allFiles
+    if (-not $scope) {
+        $scope = Get-BranchScope
+    }
+    $result = Get-CommitType -Added $added -Modified $modified -Deleted $deleted -AddedLower $addedLower -ModifiedLower ($modified | ForEach-Object { $_.ToLower() }) -DeletedLower $deletedLower -DiffContent $diffContent
+
+    $type = $result.Type
+    $desc = $result.Desc
+
+    $addedLines = ($diffContent -split "`n" | Where-Object { $_ -match "^\+[^+]" }) -join "`n"
+    $removedLines = ($diffContent -split "`n" | Where-Object { $_ -match "^-[^-]" }) -join "`n"
+
+    $detailParts = @()
+
+    $newParams = [regex]::Matches($addedLines, 'param\(\s*\[.*?\]\s*\$+(\w+)')
+    if ($newParams.Count -gt 0) {
+        $names = ($newParams | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+        $detailParts += "adds -$names parameter"
+    }
+
+    $newBashFlags = [regex]::Matches($addedLines, '"--?(\w+)"')
+    if ($newBashFlags.Count -gt 0) {
+        $names = ($newBashFlags | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(y|n|yes|no)$" } | Select-Object -Unique) -join ", "
+        if ($names) { $detailParts += "adds --$names flag" }
+    }
+
+    $addedFuncs = [regex]::Matches($addedLines, 'function\s+([\w-]+)\s*\{')
+    if ($addedFuncs.Count -gt 0) {
+        $names = ($addedFuncs | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        if ($names) { $detailParts += "adds $names function" }
+    }
+
+    $addedBashFuncs = [regex]::Matches($addedLines, '([\w_]+)\s*\(\)\s*\{')
+    if ($addedBashFuncs.Count -gt 0) {
+        $names = ($addedBashFuncs | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(contains_pattern|count_matches)$" } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        if ($names) { $detailParts += "adds $names function" }
+    }
+
+    $gitOps = [regex]::Matches($addedLines, 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)')
+    if ($gitOps.Count -gt 0) {
+        $ops = ($gitOps | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        $detailParts += "adds git $ops"
+    }
+
+    $writeHost = [regex]::Matches($addedLines, 'Write-Host\s+"([^"]{5,50})"')
+    if ($writeHost.Count -gt 0) {
+        $msgs = ($writeHost | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(Error|Warning|Pushing|Committing|Select|Cancel)" } | Select-Object -Unique | Select-Object -First 2) -join ", "
+        if ($msgs) { $detailParts += "adds $msgs messages" }
+    }
+
+    $addedImports = [regex]::Matches($addedLines, "(?:import|require)\s*\{?\s*([\w]+)")
+    if ($addedImports.Count -gt 0) {
+        $names = ($addedImports | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        $detailParts += "adds $names import"
+    }
+
+    $addedClasses = [regex]::Matches($addedLines, "(?:class)\s+(\w+)")
+    if ($addedClasses.Count -gt 0) {
+        $names = ($addedClasses | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+        $detailParts += "adds $names class"
+    }
+
+    $addedRoutes = [regex]::Matches($addedLines, "(?:router|Route|path)\s*\(\s*['""]([^'""]+)")
+    if ($addedRoutes.Count -gt 0) {
+        $paths = ($addedRoutes | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+        $detailParts += "adds $paths route"
+    }
+
+    $addedHooks = [regex]::Matches($addedLines, "(useState|useEffect|useContext|useReducer|useMemo|useCallback|useRef)\s*\(")
+    if ($addedHooks.Count -gt 0) {
+        $hookNames = ($addedLines | Select-String -Pattern "(\w+)\s*\(" | ForEach-Object { $_.Matches[0].Groups[1].Value } | Where-Object { $_ -match "^use" } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        if ($hookNames) { $detailParts += "adds $hookNames" }
+    }
+
+    if ($detailParts.Count -eq 0) {
+        $scriptFiles = @()
+        $docFiles = @()
+        $configFiles = @()
+        $otherFiles = @()
+
+        foreach ($f in ($added + $modified)) {
+            $ext = [System.IO.Path]::GetExtension($f).ToLower()
+            $name = [System.IO.Path]::GetFileName($f).ToLower()
+            if ($ext -match "\.(ps1|sh|py|rb|js|ts)$" -or $name -match "commit-msg|changelog") {
+                $scriptFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+            }
+            elseif ($ext -match "\.(md|mdx|rst|txt)$" -or $name -match "readme|changelog|contributing|license") {
+                $docFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+            }
+            elseif ($name -match "(package\.json|dockerfile|makefile|\.gitignore|\.editorconfig|tsconfig)") {
+                $configFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+            }
+            else {
+                $otherFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+            }
+        }
+
+        $mixParts = @()
+        if ($scriptFiles.Count -gt 0) { $mixParts += "scripts ($($scriptFiles -join ', '))" }
+        if ($docFiles.Count -gt 0) { $mixParts += "docs ($($docFiles -join ', '))" }
+        if ($configFiles.Count -gt 0) { $mixParts += "config ($($configFiles -join ', '))" }
+        if ($otherFiles.Count -gt 0) { $mixParts += ($otherFiles | Select-Object -First 3) -join ", " }
+
+        if ($mixParts.Count -gt 0) {
+            $detailParts += "updates $($mixParts -join ' and ')"
+        }
+        elseif ($Deleted.Count -gt 0) {
+            $delNames = ($Deleted | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Select-Object -First 2) -join ", "
+            $detailParts += "removes $delNames"
+        }
+    }
+
+    $detailDesc = $detailParts -join " and "
+
+    $gitmoji = @{}
+    $gitmoji["feat"]     = [char]::ConvertFromUtf32(0x2728)
+    $gitmoji["fix"]      = [char]::ConvertFromUtf32(0x1F41B)
+    $gitmoji["docs"]     = [char]::ConvertFromUtf32(0x1F4DD)
+    $gitmoji["style"]    = [char]::ConvertFromUtf32(0x1F484)
+    $gitmoji["refactor"] = [char]::ConvertFromUtf32(0x267B)
+    $gitmoji["perf"]     = [char]::ConvertFromUtf32(0x26A1)
+    $gitmoji["test"]     = [char]::ConvertFromUtf32(0x2705)
+    $gitmoji["build"]    = [char]::ConvertFromUtf32(0x1F527)
+    $gitmoji["ci"]       = [char]::ConvertFromUtf32(0x1F477)
+    $gitmoji["chore"]    = [char]::ConvertFromUtf32(0x1F528)
+    $gitmoji["revert"]   = [char]::ConvertFromUtf32(0x23EA)
+
+    $emoji = $gitmoji[$type]
+
+    if ($scope) {
+        $simpleWithEmoji    = "$emoji ${type}(${scope}): $desc"
+        $simpleWithoutEmoji = "${type}(${scope}): $desc"
+        $detailWithEmoji    = "$emoji ${type}(${scope}): $detailDesc"
+        $detailWithoutEmoji = "${type}(${scope}): $detailDesc"
+    } else {
+        $simpleWithEmoji    = "$emoji ${type}: $desc"
+        $simpleWithoutEmoji = "${type}: $desc"
+        $detailWithEmoji    = "$emoji ${type}: $detailDesc"
+        $detailWithoutEmoji = "${type}: $detailDesc"
+    }
+
+    function Truncate-Msg {
+        param([string]$Msg, [int]$MaxLen = 50)
+        if ($Msg.Length -le $MaxLen) { return $Msg }
+        $cut = $Msg.Substring(0, $MaxLen - 1)
+        return $cut.TrimEnd() + "~"
+    }
+
+    Write-Host ""
+    Write-Host "=== Choose your commit message ===" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  [1] $simpleWithEmoji" -ForegroundColor White
+    Write-Host "  [2] $simpleWithoutEmoji" -ForegroundColor White
+    Write-Host "  [3] $detailWithEmoji" -ForegroundColor White
+    Write-Host "  [4] $detailWithoutEmoji" -ForegroundColor White
+    Write-Host "  [0] Cancel" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $choice = Read-Host "  Select (0-4)"
+
+    switch ($choice) {
+        "1" { $selectedMsg = $simpleWithEmoji }
+        "2" { $selectedMsg = $simpleWithoutEmoji }
+        "3" { $selectedMsg = $detailWithEmoji }
+        "4" { $selectedMsg = $detailWithoutEmoji }
+        default {
+            Write-Host ""
+            Write-Host "  Cancelled." -ForegroundColor Yellow
+            exit 0
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  Committing: $selectedMsg" -ForegroundColor Cyan
+    git commit -m "$selectedMsg"
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host ""
+        $push = Read-Host "  Push to remote? (y/n)"
+        if ($push -eq "y" -or $push -eq "Y") {
+            Write-Host ""
+            Write-Host "  Pushing..." -ForegroundColor Cyan
+            git push
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Pushed successfully!" -ForegroundColor Green
+            } else {
+                Write-Host "  Push failed." -ForegroundColor Red
+            }
+        }
+    } else {
+        Write-Host ""
+        Write-Host "  Commit failed." -ForegroundColor Red
     }
 }
 
-$allFiles   = $added + $modified
-$addedLower = $allFiles | ForEach-Object { $_.ToLower() }
-$deletedLower = $deleted | ForEach-Object { $_.ToLower() }
-
-# --- Scope detection from folder structure ---
 function Get-Scope {
     param([string[]]$Files)
 
@@ -130,7 +346,28 @@ function Get-Scope {
     return ""
 }
 
-# --- Type detection ---
+function Get-BranchScope {
+    $branch = git symbolic-ref --short HEAD 2>$null
+    if (-not $branch) { return "" }
+
+    $ignored = @("main", "master", "develop", "dev", "staging", "production", "release")
+    if ($ignored -contains $branch) { return "" }
+
+    if ($branch -match "/(.+)") {
+        $scope = $Matches[1]
+        $prefixes = @("feature/", "bugfix/", "hotfix/", "fix/", "chore/", "docs/", "test/", "refactor/", "perf/", "release/")
+        foreach ($p in $prefixes) {
+            if ($scope -match "^$p(.+)$") {
+                $scope = $Matches[1]
+                break
+            }
+        }
+        return $scope
+    }
+
+    return ""
+}
+
 function Get-CommitType {
     param(
         [string[]]$Added,
@@ -145,11 +382,9 @@ function Get-CommitType {
     $allModified = $AddedLower + $ModifiedLower
     $allChanged  = $AddedLower + $ModifiedLower + $DeletedLower
 
-    # --- Detect test files ---
     $testFiles = $allModified | Where-Object { $_ -match "(test|spec|\.test\.|\.spec\.)" }
     $nonTestFiles = $allModified | Where-Object { $_ -notmatch "(test|spec|\.test\.|\.spec\.)" }
 
-    # --- Detect config / build files ---
     $configPatterns = @(
         "package\.json", "package-lock\.json", "yarn\.lock", "pnpm-lock",
         "tsconfig", "jsconfig", "webpack", "vite\.config", "rollup\.config",
@@ -168,47 +403,39 @@ function Get-CommitType {
         $configPatterns | Where-Object { $file -match $_ }
     }
 
-    # --- Detect CI files ---
     $ciPatterns = @("\.github/workflows", "\.gitlab-ci", "\.circleci", "\.travis", "jenkins", "azure-pipelines", "bitbucket-pipelines")
     $isCI = $allChanged | Where-Object {
         $file = $_
         $ciPatterns | Where-Object { $file -match $_ }
     }
 
-    # --- Detect documentation ---
     $docPatterns = @("readme", "changelog", "contributing", "license", "authors", "docs/", "\.md$", "\.mdx$", "\.rst$", "\.txt$")
     $isDoc = $allChanged | Where-Object {
         $file = $_
         $docPatterns | Where-Object { $file -match $_ }
     }
 
-    # --- Detect style files ---
     $stylePatterns = @("\.css$", "\.scss$", "\.less$", "\.sass$", "\.stylus$", "\.prettierrc", "\.stylelintrc", "stylelint")
     $isStyle = $allChanged | Where-Object {
         $file = $_
         $stylePatterns | Where-Object { $file -match $_ }
     }
 
-    # --- Detect migration / db ---
     $dbPatterns = @("migration", "migrate", "schema", "\.sql$", "knex", "prisma", "sequelize", "typeorm", "drizzle")
     $isDB = $allChanged | Where-Object {
         $file = $_
         $dbPatterns | Where-Object { $file -match $_ }
     }
 
-    # --- Detect performance-related content (skip for docs, config, test, style, and script files) ---
     $isScript = $allChanged | Where-Object { $_ -match "(commit-msg|\.sh$|\.ps1$|\.py$|\.rb$|\.js$|\.ts$)" }
     $hasPerfContent = $DiffContent -match "(perf|optim|cache|lazy|memo|defer|throttle|debounce|batch|index)"
 
-    # --- Detect breaking change ---
     $hasBreaking = $DiffContent -match "(BREAKING|breaking.change)"
 
-    # --- Analyze diff for specific descriptions ---
     $addedLines   = ($DiffContent -split "`n" | Where-Object { $_ -match "^\+[^+]" }) -join "`n"
     $removedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^-[^-]" }) -join "`n"
     $diffAll      = $DiffContent
 
-    # Extract meaningful items from diff
     $addedImports   = [regex]::Matches($addedLines, "(?:import|require)\s*\{?\s*([\w]+)")
     $removedImports = [regex]::Matches($removedLines, "(?:import|require)\s*\{?\s*([\w]+)")
     $addedFunctions = [regex]::Matches($addedLines, "(?:function|const|let|var)\s+(\w+)")
@@ -223,7 +450,6 @@ function Get-CommitType {
     $addedEvents    = [regex]::Matches($addedLines, "(?:addEventListener|\.on\(\s*['""])(\w+)")
     $addedAsync     = [regex]::Matches($addedLines, "(?:async|await|Promise|\.then\()")
 
-    # Build specific description
     $specificParts = @()
 
     if ($addedImports.Count -gt 0) {
@@ -266,7 +492,6 @@ function Get-CommitType {
         $specificParts += "adds async handling"
     }
 
-    # Fallback descriptions based on file content patterns
     if ($specificParts.Count -eq 0) {
         if ($addedLines -match "console\.(log|error|warn)") {
             $specificParts += "adds logging"
@@ -305,9 +530,6 @@ function Get-CommitType {
 
     $specificDesc = $specificParts -join " and "
 
-    # --- Priority-based type detection ---
-
-    # Deleted only -> revert or refactor
     if ($Deleted.Count -gt 0 -and $Added.Count -eq 0 -and $Modified.Count -eq 0) {
         if ($Deleted.Count -eq 1) {
             $name = [System.IO.Path]::GetFileName($Deleted[0])
@@ -321,7 +543,6 @@ function Get-CommitType {
         }
     }
 
-    # Config/build only
     if ($isConfig.Count -gt 0 -and $nonTestFiles.Count -eq 0 -and $isDoc.Count -eq 0 -and $isCI.Count -eq 0) {
         if ($isCI.Count -gt 0) {
             return @{ Type = "ci"; Desc = "updates CI configuration" }
@@ -340,12 +561,10 @@ function Get-CommitType {
         return @{ Type = "chore"; Desc = "updates configuration" }
     }
 
-    # CI only
     if ($isCI.Count -gt 0 -and $nonTestFiles.Count -eq 0) {
         return @{ Type = "ci"; Desc = "updates CI pipeline" }
     }
 
-    # Documentation only
     if ($isDoc.Count -gt 0 -and $nonTestFiles.Count -eq 0 -and $isConfig.Count -eq 0) {
         if ($specificDesc) {
             return @{ Type = "docs"; Desc = $specificDesc }
@@ -353,7 +572,6 @@ function Get-CommitType {
         return @{ Type = "docs"; Desc = "updates documentation" }
     }
 
-    # Test only
     if ($testFiles.Count -gt 0 -and $nonTestFiles.Count -eq 0) {
         if ($Added.Count -gt 0 -and $Modified.Count -eq 0) {
             if ($testFiles.Count -eq 1) {
@@ -376,7 +594,6 @@ function Get-CommitType {
         return @{ Type = "test"; Desc = "updates tests" }
     }
 
-    # Style only
     if ($isStyle.Count -gt 0 -and $nonTestFiles.Count -eq 0) {
         if ($specificDesc) {
             return @{ Type = "style"; Desc = $specificDesc }
@@ -384,7 +601,6 @@ function Get-CommitType {
         return @{ Type = "style"; Desc = "fixes formatting" }
     }
 
-    # DB / migrations
     if ($isDB.Count -gt 0 -and $nonTestFiles.Count -eq 0) {
         if ($Added.Count -gt 0 -and $Modified.Count -eq 0) {
             $tableNames = [regex]::Matches($diffAll, "(?:CREATE TABLE|ALTER TABLE|INSERT INTO)\s+(\w+)")
@@ -397,7 +613,6 @@ function Get-CommitType {
         return @{ Type = "fix"; Desc = "fixes database schema" }
     }
 
-    # Performance content detected (skip for docs, config, test, style, and script files)
     if ($hasPerfContent -and $Added.Count -eq 0 -and $isDoc.Count -eq 0 -and $isConfig.Count -eq 0 -and $testFiles.Count -eq 0 -and $isStyle.Count -eq 0 -and $isScript.Count -eq 0) {
         $perfItems = [regex]::Matches($diffAll, "(cache|memo|lazy|defer|throttle|debounce|batch|index|optim)")
         if ($perfItems.Count -gt 0) {
@@ -407,9 +622,6 @@ function Get-CommitType {
         return @{ Type = "perf"; Desc = "improves performance" }
     }
 
-    # --- Mixed changes ---
-
-    # New files added (feature)
     if ($Added.Count -gt 0 -and $Modified.Count -eq 0 -and $Deleted.Count -eq 0) {
         if ($Added.Count -eq 1) {
             $name = [System.IO.Path]::GetFileName($Added[0])
@@ -430,7 +642,6 @@ function Get-CommitType {
         return @{ Type = "feat"; Desc = "adds $($Added.Count) files" }
     }
 
-    # Only modifications
     if ($Added.Count -eq 0 -and $Modified.Count -gt 0 -and $Deleted.Count -eq 0) {
         if ($Modified.Count -eq 1) {
             $name = [System.IO.Path]::GetFileName($Modified[0])
@@ -454,7 +665,6 @@ function Get-CommitType {
         return @{ Type = "refactor"; Desc = "updates $($Modified.Count) files" }
     }
 
-    # Mixed additions + modifications + deletions
     if ($specificDesc) {
         return @{ Type = "refactor"; Desc = $specificDesc }
     }
@@ -465,238 +675,185 @@ function Get-CommitType {
     return @{ Type = "refactor"; Desc = ($parts -join ", ") }
 }
 
-# --- Auto-scope from branch name ---
-function Get-BranchScope {
-    $branch = git symbolic-ref --short HEAD 2>$null
-    if (-not $branch) { return "" }
+function Invoke-Changelog {
+    param(
+        [switch]$SinceTag,
+        [int]$Limit = 50
+    )
 
-    $ignored = @("main", "master", "develop", "dev", "staging", "production", "release")
-    if ($ignored -contains $branch) { return "" }
+    if ($SinceTag) {
+        $lastTag = ""
+        try {
+            $lastTag = git describe --tags --abbrev=0 2>&1
+            if ($LASTEXITCODE -ne 0) { $lastTag = "" }
+        } catch { $lastTag = "" }
 
-    if ($branch -match "/(.+)") {
-        $scope = $Matches[1]
-        $prefixes = @("feature/", "bugfix/", "hotfix/", "fix/", "chore/", "docs/", "test/", "refactor/", "perf/", "release/")
-        foreach ($p in $prefixes) {
-            if ($scope -match "^$p(.+)$") {
-                $scope = $Matches[1]
-                break
-            }
+        if ($lastTag) {
+            $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad" --date=short
+        } else {
+            Write-Host "No tags found. Showing all commits." -ForegroundColor Yellow
+            $log = git log --pretty=format:"%H|%s|%ad" --date=short -n $Limit
         }
-        return $scope
+    } else {
+        $log = git log --pretty=format:"%H|%s|%ad" --date=short -n $Limit
     }
 
-    return ""
-}
-
-$scope = Get-Scope -Files $allFiles
-if (-not $scope) {
-    $scope = Get-BranchScope
-}
-$result = Get-CommitType -Added $added -Modified $modified -Deleted $deleted -AddedLower $addedLower -ModifiedLower ($modified | ForEach-Object { $_.ToLower() }) -DeletedLower $deletedLower -DiffContent $diffContent
-
-$type = $result.Type
-$desc = $result.Desc
-
-# --- Build detailed description from diff content ---
-$addedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^\+[^+]" }) -join "`n"
-$removedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^-[^-]" }) -join "`n"
-
-$detailParts = @()
-
-# --- 1. Detect new parameters/flags (highest value signal) ---
-$newParams = [regex]::Matches($addedLines, 'param\(\s*\[.*?\]\s*\$+(\w+)')
-if ($newParams.Count -gt 0) {
-    $names = ($newParams | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
-    $detailParts += "adds -$names parameter"
-}
-
-# Detect bash flags like "--undo" or "-u"
-$newBashFlags = [regex]::Matches($addedLines, '"--?(\w+)"')
-if ($newBashFlags.Count -gt 0) {
-    $names = ($newBashFlags | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(y|n|yes|no)$" } | Select-Object -Unique) -join ", "
-    if ($names) { $detailParts += "adds --$names flag" }
-}
-
-# --- 2. Detect new function definitions ---
-# PowerShell functions
-$addedFuncs = [regex]::Matches($addedLines, 'function\s+([\w-]+)\s*\{')
-if ($addedFuncs.Count -gt 0) {
-    $names = ($addedFuncs | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
-    if ($names) { $detailParts += "adds $names function" }
-}
-
-# Bash functions
-$addedBashFuncs = [regex]::Matches($addedLines, '([\w_]+)\s*\(\)\s*\{')
-if ($addedBashFuncs.Count -gt 0) {
-    $names = ($addedBashFuncs | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(contains_pattern|count_matches)$" } | Select-Object -Unique | Select-Object -First 3) -join ", "
-    if ($names) { $detailParts += "adds $names function" }
-}
-
-# --- 3. Detect git operations in new code ---
-$gitOps = [regex]::Matches($addedLines, 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)')
-if ($gitOps.Count -gt 0) {
-    $ops = ($gitOps | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
-    $detailParts += "adds git $ops"
-}
-
-# --- 4. Detect write/host or echo with key messages ---
-$writeHost = [regex]::Matches($addedLines, 'Write-Host\s+"([^"]{5,50})"')
-if ($writeHost.Count -gt 0) {
-    $msgs = ($writeHost | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(Error|Warning|Pushing|Committing|Select|Cancel)" } | Select-Object -Unique | Select-Object -First 2) -join ", "
-    if ($msgs) { $detailParts += "adds $msgs messages" }
-}
-
-# --- 5. Detect imports, classes, hooks, routes (for code projects) ---
-$addedImports = [regex]::Matches($addedLines, "(?:import|require)\s*\{?\s*([\w]+)")
-if ($addedImports.Count -gt 0) {
-    $names = ($addedImports | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
-    $detailParts += "adds $names import"
-}
-
-$addedClasses = [regex]::Matches($addedLines, "(?:class)\s+(\w+)")
-if ($addedClasses.Count -gt 0) {
-    $names = ($addedClasses | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
-    $detailParts += "adds $names class"
-}
-
-$addedRoutes = [regex]::Matches($addedLines, "(?:router|Route|path)\s*\(\s*['""]([^'""]+)")
-if ($addedRoutes.Count -gt 0) {
-    $paths = ($addedRoutes | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
-    $detailParts += "adds $paths route"
-}
-
-$addedHooks = [regex]::Matches($addedLines, "(useState|useEffect|useContext|useReducer|useMemo|useCallback|useRef)\s*\(")
-if ($addedHooks.Count -gt 0) {
-    $hookNames = ($addedLines | Select-String -Pattern "(\w+)\s*\(" | ForEach-Object { $_.Matches[0].Groups[1].Value } | Where-Object { $_ -match "^use" } | Select-Object -Unique | Select-Object -First 3) -join ", "
-    if ($hookNames) { $detailParts += "adds $hookNames" }
-}
-
-# --- 6. Fallback: describe file change mix ---
-if ($detailParts.Count -eq 0) {
-    # Categorize changed files
-    $scriptFiles = @()
-    $docFiles = @()
-    $configFiles = @()
-    $otherFiles = @()
-
-    foreach ($f in ($added + $modified)) {
-        $ext = [System.IO.Path]::GetExtension($f).ToLower()
-        $name = [System.IO.Path]::GetFileName($f).ToLower()
-        if ($ext -match "\.(ps1|sh|py|rb|js|ts)$" -or $name -match "commit-msg|changelog") {
-            $scriptFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
-        }
-        elseif ($ext -match "\.(md|mdx|rst|txt)$" -or $name -match "readme|changelog|contributing|license") {
-            $docFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
-        }
-        elseif ($name -match "(package\.json|dockerfile|makefile|\.gitignore|\.editorconfig|tsconfig)") {
-            $configFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
-        }
-        else {
-            $otherFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
-        }
-    }
-
-    $mixParts = @()
-    if ($scriptFiles.Count -gt 0) { $mixParts += "scripts ($($scriptFiles -join ', '))" }
-    if ($docFiles.Count -gt 0) { $mixParts += "docs ($($docFiles -join ', '))" }
-    if ($configFiles.Count -gt 0) { $mixParts += "config ($($configFiles -join ', '))" }
-    if ($otherFiles.Count -gt 0) { $mixParts += ($otherFiles | Select-Object -First 3) -join ", " }
-
-    if ($mixParts.Count -gt 0) {
-        $detailParts += "updates $($mixParts -join ' and ')"
-    }
-    elseif ($Deleted.Count -gt 0) {
-        $delNames = ($Deleted | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Select-Object -First 2) -join ", "
-        $detailParts += "removes $delNames"
-    }
-}
-
-$detailDesc = $detailParts -join " and "
-
-# --- Gitmoji mapping (Unicode for PS 5.1) ---
-$gitmoji = @{}
-$gitmoji["feat"]     = [char]::ConvertFromUtf32(0x2728)
-$gitmoji["fix"]      = [char]::ConvertFromUtf32(0x1F41B)
-$gitmoji["docs"]     = [char]::ConvertFromUtf32(0x1F4DD)
-$gitmoji["style"]    = [char]::ConvertFromUtf32(0x1F484)
-$gitmoji["refactor"] = [char]::ConvertFromUtf32(0x267B)
-$gitmoji["perf"]     = [char]::ConvertFromUtf32(0x26A1)
-$gitmoji["test"]     = [char]::ConvertFromUtf32(0x2705)
-$gitmoji["build"]    = [char]::ConvertFromUtf32(0x1F527)
-$gitmoji["ci"]       = [char]::ConvertFromUtf32(0x1F477)
-$gitmoji["chore"]    = [char]::ConvertFromUtf32(0x1F528)
-$gitmoji["revert"]   = [char]::ConvertFromUtf32(0x23EA)
-
-# --- Build both versions (simple + detailed) ---
-$emoji = $gitmoji[$type]
-
-if ($scope) {
-    # Simple version
-    $simpleWithEmoji    = "$emoji ${type}(${scope}): $desc"
-    $simpleWithoutEmoji = "${type}(${scope}): $desc"
-    # Detailed version
-    $detailWithEmoji    = "$emoji ${type}(${scope}): $detailDesc"
-    $detailWithoutEmoji = "${type}(${scope}): $detailDesc"
-} else {
-    # Simple version
-    $simpleWithEmoji    = "$emoji ${type}: $desc"
-    $simpleWithoutEmoji = "${type}: $desc"
-    # Detailed version
-    $detailWithEmoji    = "$emoji ${type}: $detailDesc"
-    $detailWithoutEmoji = "${type}: $detailDesc"
-}
-
-# --- Enforce <=50 chars on summary (trim if needed) ---
-function Truncate-Msg {
-    param([string]$Msg, [int]$MaxLen = 50)
-    if ($Msg.Length -le $MaxLen) { return $Msg }
-    $cut = $Msg.Substring(0, $MaxLen - 1)
-    return $cut.TrimEnd() + "~"
-}
-
-# --- Output ---
-Write-Host ""
-Write-Host "=== Choose your commit message ===" -ForegroundColor Green
-Write-Host ""
-Write-Host "  [1] $simpleWithEmoji" -ForegroundColor White
-Write-Host "  [2] $simpleWithoutEmoji" -ForegroundColor White
-Write-Host "  [3] $detailWithEmoji" -ForegroundColor White
-Write-Host "  [4] $detailWithoutEmoji" -ForegroundColor White
-Write-Host "  [0] Cancel" -ForegroundColor DarkGray
-Write-Host ""
-
-$choice = Read-Host "  Select (0-4)"
-
-switch ($choice) {
-    "1" { $selectedMsg = $simpleWithEmoji }
-    "2" { $selectedMsg = $simpleWithoutEmoji }
-    "3" { $selectedMsg = $detailWithEmoji }
-    "4" { $selectedMsg = $detailWithoutEmoji }
-    default {
-        Write-Host ""
-        Write-Host "  Cancelled." -ForegroundColor Yellow
+    if (-not $log) {
+        Write-Host "No commits found." -ForegroundColor Yellow
         exit 0
     }
-}
 
-Write-Host ""
-Write-Host "  Committing: $selectedMsg" -ForegroundColor Cyan
-git commit -m "$selectedMsg"
+    $types = @{
+        "feat"     = @{ Title = "Features";       Commits = @() }
+        "fix"      = @{ Title = "Bug Fixes";       Commits = @() }
+        "perf"     = @{ Title = "Performance";     Commits = @() }
+        "refactor" = @{ Title = "Refactoring";     Commits = @() }
+        "docs"     = @{ Title = "Documentation";   Commits = @() }
+        "test"     = @{ Title = "Tests";           Commits = @() }
+        "build"    = @{ Title = "Build";           Commits = @() }
+        "ci"       = @{ Title = "CI/CD";           Commits = @() }
+        "chore"    = @{ Title = "Chores";          Commits = @() }
+        "style"    = @{ Title = "Style";           Commits = @() }
+        "revert"   = @{ Title = "Reverts";         Commits = @() }
+    }
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host ""
-    $push = Read-Host "  Push to remote? (y/n)"
-    if ($push -eq "y" -or $push -eq "Y") {
-        Write-Host ""
-        Write-Host "  Pushing..." -ForegroundColor Cyan
-        git push
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  Pushed successfully!" -ForegroundColor Green
-        } else {
-            Write-Host "  Push failed." -ForegroundColor Red
+    $allCommits = @()
+    $dates = @{}
+
+    foreach ($line in ($log -split "`n")) {
+        if (-not $line -or $line -eq "") { continue }
+
+        $parts = $line -split "\|", 3
+        if ($parts.Count -lt 3) { continue }
+
+        $hash = $parts[0].Trim()
+        $message = $parts[1].Trim()
+        $date = $parts[2].Trim()
+
+        $typeMatch = [regex]::Match($message, "(\w+)(?:\(([^)]+)\))?[!]?:\s*(.+)")
+        if ($typeMatch.Success) {
+            $type = $typeMatch.Groups[1].Value.ToLower()
+            $scope = $typeMatch.Groups[2].Value
+            $desc = $typeMatch.Groups[3].Value
+            $shortHash = $hash.Substring(0, [Math]::Min(7, $hash.Length))
+
+            $commitObj = @{
+                Hash = $shortHash
+                Message = $message
+                Scope = $scope
+                Description = $desc
+                Date = $date
+            }
+
+            if ($types.ContainsKey($type)) {
+                $types[$type].Commits += $commitObj
+            } else {
+                $types["chore"].Commits += $commitObj
+            }
+
+            if (-not $dates.ContainsKey($date)) {
+                $dates[$date] = @()
+            }
+            $dates[$date] += $commitObj
+
+            $allCommits += $commitObj
         }
     }
-} else {
+
+    if ($allCommits.Count -eq 0) {
+        Write-Host "No conventional commits found." -ForegroundColor Yellow
+        exit 0
+    }
+
+    $lastTag = ""
+    try {
+        $lastTag = git describe --tags --abbrev=0 2>&1
+        if ($LASTEXITCODE -ne 0) { $lastTag = "" }
+    } catch { $lastTag = "" }
+
+    if ($lastTag) {
+        $currentVersion = $lastTag -replace "^v", ""
+    } else {
+        $currentVersion = "0.1.0"
+    }
+
+    $hasFeat = $types["feat"].Commits.Count -gt 0
+    $hasFix = $types["fix"].Commits.Count -gt 0
+    $hasBreaking = $allCommits | Where-Object { $_.Message -match "!" }
+
+    if ($hasBreaking) {
+        $parts = $currentVersion -split "\."
+        $newVersion = "$([int]$parts[0] + 1).0.0"
+    } elseif ($hasFeat) {
+        $parts = $currentVersion -split "\."
+        $newVersion = "$($parts[0]).$([int]$parts[1] + 1).0"
+    } elseif ($hasFix) {
+        $parts = $currentVersion -split "\."
+        $newVersion = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+    } else {
+        $newVersion = $currentVersion
+    }
+
+    $today = Get-Date -Format "yyyy-MM-dd"
+
+    $changelog = @"
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+
+"@
+
+    $changelog += "## [$newVersion]($today)`n`n"
+
+    foreach ($type in @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")) {
+        $typeData = $types[$type]
+        if ($typeData.Commits.Count -gt 0) {
+            $changelog += "### $($typeData.Title)`n`n"
+            foreach ($commit in $typeData.Commits) {
+                $cHash = $commit.Hash
+                $cScope = $commit.Scope
+                $cDesc = $commit.Description
+                if ($cScope) {
+                    $line = "- **${cScope}:** ${cDesc} (${cHash})"
+                    $changelog += $line + [char]10
+                } else {
+                    $line = "- ${cDesc} (${cHash})"
+                    $changelog += $line + [char]10
+                }
+            }
+            $changelog += [char]10
+        }
+    }
+
+    $changelog | Out-File -FilePath "CHANGELOG.md" -Encoding UTF8
+
+    Write-Host "=== Changelog generated ===" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Commit failed." -ForegroundColor Red
+    Write-Host "  Version: $newVersion" -ForegroundColor White
+    Write-Host "  Commits: $($allCommits.Count)" -ForegroundColor White
+    Write-Host "  File:    CHANGELOG.md" -ForegroundColor White
+    Write-Host ""
+
+    Write-Host "=== Preview ===" -ForegroundColor Cyan
+    Write-Host ""
+    $lines = $changelog -split "`n" | Select-Object -First 30
+    foreach ($line in $lines) {
+        Write-Host "  $line"
+    }
+    if (($changelog -split "`n").Count -gt 30) {
+        Write-Host "  ..." -ForegroundColor DarkGray
+    }
+}
+
+switch ($Command.ToLower()) {
+    "" { Invoke-Commit }
+    "commit" { Invoke-Commit }
+    "undo" { Invoke-Undo }
+    "changelog" { Invoke-Changelog -SinceTag:$SinceTag -Limit $Limit }
+    default {
+        Write-Host "Unknown command: $Command" -ForegroundColor Red
+        Show-Help
+    }
 }

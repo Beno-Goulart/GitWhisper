@@ -4,8 +4,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ ! -f "$SCRIPT_DIR/commit-msg.sh" ]; then
-    echo "Error: commit-msg.sh not found in $SCRIPT_DIR"
+if [ ! -f "$SCRIPT_DIR/gitwhisper.sh" ]; then
+    echo "Error: gitwhisper.sh not found in $SCRIPT_DIR"
     exit 1
 fi
 
@@ -30,9 +30,7 @@ fi
 cat >> "$PROFILE_FILE" << EOF
 
 # >>> GitWhisper >>>
-commit-msg() { bash "$SCRIPT_DIR/commit-msg.sh" "\$@"; }
-commit-msg-undo() { bash "$SCRIPT_DIR/commit-msg.sh" --undo; }
-changelog() { bash "$SCRIPT_DIR/changelog.sh" "\$@"; }
+gitwhisper() { bash "$SCRIPT_DIR/gitwhisper.sh" "\$@"; }
 # <<< GitWhisper <<<
 EOF
 
@@ -43,9 +41,9 @@ echo "  Functions added to:"
 echo "  $PROFILE_FILE"
 echo ""
 echo "  Available commands:"
-printf "    commit-msg        \033[36m- generate commit message\033[0m\n"
-printf "    commit-msg-undo   \033[36m- undo last commit\033[0m\n"
-printf "    changelog         \033[36m- generate changelog\033[0m\n"
+printf "    gitwhisper            \033[36m- unified command (commit, undo, changelog)\033[0m\n"
+echo ""
+echo "  Usage: gitwhisper [commit|undo|changelog|help]"
 echo ""
 echo "  Restart your terminal or run:"
 echo "    source $PROFILE_FILE"

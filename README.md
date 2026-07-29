@@ -29,7 +29,7 @@ GitWhisper is a cross-platform tool that analyzes your `git diff` and auto-gener
 ## Preview
 
 ```
-PS C:\MyProject> commit-msg
+PS C:\MyProject> gitwhisper
 
 === Changes detected ===
 
@@ -66,6 +66,7 @@ PS C:\MyProject> commit-msg
 | Staged Only | Only analyzes what's staged (what will be committed) |
 | PS 5.1 Compatible | Unicode escapes for full Windows PowerShell compatibility |
 | Cross-Platform | PowerShell for Windows, Bash for Linux/macOS |
+
 | 50/72 Rule | Enforces conventional commit summary length |
 
 ## Quick Start
@@ -98,26 +99,11 @@ Restart your terminal after installation.
 ```powershell
 cd C:\MyProject
 git add .
-commit-msg
+gitwhisper
 # Select 1-4, then confirm push
 ```
 
 > **Note:** Install once, use everywhere. Run `git pull` in the GitWhisper folder to get updates — no reinstall needed.
-
-### Alternative: Copy to project
-
-If you prefer not to install globally, you can copy the script directly into your project:
-
-```powershell
-# Windows
-Copy-Item "commit-msg.ps1" -Destination "C:\MyProject\"
-.\commit-msg.ps1
-
-# Linux/macOS
-cp commit-msg.sh /path/to/MyProject/
-chmod +x commit-msg.sh
-./commit-msg.sh
-```
 
 ## Undo Last Commit
 
@@ -126,15 +112,15 @@ Quickly undo the last commit with a simple interactive menu.
 ### PowerShell
 
 ```powershell
-commit-msg-undo          # if installed globally
-.\commit-msg.ps1 -Undo   # if running directly
+gitwhisper undo              # unified command
+.\gitwhisper.ps1 undo        # if running directly
 ```
 
 ### Bash
 
 ```bash
-commit-msg-undo            # if installed globally
-./commit-msg.sh --undo     # if running directly
+gitwhisper undo              # unified command
+./gitwhisper.sh undo         # if running directly
 ```
 
 ### Reset Options
@@ -160,29 +146,27 @@ commit-msg-undo            # if installed globally
 
 ## Commands
 
-### Global functions (after install)
+### Global function (after install)
 
 | Command | Description |
 |---|---|
-| `commit-msg` | Generate commit message and commit interactively |
-| `commit-msg-undo` | Undo last commit (soft or mixed reset) |
-| `changelog` | Generate CHANGELOG.md from commit history |
+| `gitwhisper` | Unified command: `gitwhisper [commit\|undo\|changelog\|help]` |
 
 ### Direct script usage
 
 | Command | Description |
 |---|---|
-| `.\commit-msg.ps1` / `./commit-msg.sh` | Generate commit message and commit interactively |
-| `.\commit-msg.ps1 -Undo` / `./commit-msg.sh --undo` | Undo last commit (soft or mixed reset) |
-| `.\changelog.ps1` / `./changelog.sh` | Generate CHANGELOG.md from commit history |
-| `.\changelog.ps1 -SinceTag` / `./changelog.sh --since-tag` | Generate only since last tag |
-| `.\changelog.ps1 -Limit 100` / `./changelog.sh --limit 100` | Limit to last 100 commits |
+| `.\gitwhisper.ps1` / `./gitwhisper.sh` | Generate commit message and commit interactively |
+| `.\gitwhisper.ps1 undo` / `./gitwhisper.sh undo` | Undo last commit (soft or mixed reset) |
+| `.\gitwhisper.ps1 changelog` / `./gitwhisper.sh changelog` | Generate CHANGELOG.md from commit history |
+| `.\gitwhisper.ps1 changelog -SinceTag` / `./gitwhisper.sh changelog --since-tag` | Generate only since last tag |
+| `.\gitwhisper.ps1 changelog -Limit 100` / `./gitwhisper.sh changelog --limit 100` | Limit to last 100 commits |
 
 ## Architecture
 
 ```mermaid
 graph TD
-    Script["commit-msg.ps1"]
+    Script["gitwhisper.ps1 / gitwhisper.sh"]
 
     subgraph Input
         DiffStaged["git diff --staged --name-status"]
@@ -199,7 +183,6 @@ graph TD
     subgraph Logic
         Scope["Get-Scope"]
         Type["Get-CommitType"]
-        Truncate["Truncate-Msg"]
     end
 
     subgraph Output
@@ -220,9 +203,8 @@ graph TD
 
     DiffContent --> Scope
     Scope --> Type
-    Type --> Truncate
-    Truncate --> Emoji
-    Truncate --> NoEmoji
+    Type --> Emoji
+    Type --> NoEmoji
 ```
 
 ### Detection Priority
@@ -299,35 +281,35 @@ The script analyzes the **actual diff content** to generate precise descriptions
 ### Adding a new component
 
 ```powershell
-commit-msg
+gitwhisper
 # Output: ✨ feat(auth): adds Login component in auth.js
 ```
 
 ### Fixing a bug
 
 ```powershell
-commit-msg
+gitwhisper
 # Output: 🐛 fix(api): adds error handling in user.js
 ```
 
 ### Updating dependencies
 
 ```powershell
-commit-msg
+gitwhisper
 # Output: 🔧 build: updates axios dependency
 ```
 
 ### Adding tests
 
 ```powershell
-commit-msg
+gitwhisper
 # Output: ✅ test: adds formatCurrency test for utils.test.js
 ```
 
 ### Refactoring with mixed changes
 
 ```powershell
-commit-msg
+gitwhisper
 # Output: ♻️ refactor: adds formatPrice and removes legacy calculation from utils.js
 ```
 
@@ -339,14 +321,14 @@ Generate a `CHANGELOG.md` from your commit history.
 
 ```powershell
 # If installed globally
-changelog
-changelog -SinceTag
-changelog -Limit 100
+gitwhisper changelog
+gitwhisper changelog -SinceTag
+gitwhisper changelog -Limit 100
 
 # If running directly
-.\changelog.ps1
-.\changelog.ps1 -SinceTag
-.\changelog.ps1 -Limit 100
+.\gitwhisper.ps1 changelog
+.\gitwhisper.ps1 changelog -SinceTag
+.\gitwhisper.ps1 changelog -Limit 100
 ```
 
 ### Output Example
@@ -387,20 +369,18 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 
 | Component | Technology |
 |---|---|
-| Language | PowerShell 5.1+ / 7.0+ |
+| Language | PowerShell 5.1+ / Bash 4.0+ |
 | Version Control | Git 2.0+ |
 | Convention | [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/) |
-| Emoji | [Gitmoji](https://gitmoji.dev/) via Unicode escapes |
+| Emoji | [Gitmoji](https://gitmoji.dev/) |
 | OS | Windows, Linux, macOS |
 
 ## Project Structure
 
 ```
 GitWhisper/
-├── commit-msg.ps1          # Main script (Windows)
-├── commit-msg.sh           # Main script (Linux/Mac)
-├── changelog.ps1           # Changelog generator (Windows)
-├── changelog.sh            # Changelog generator (Linux/Mac)
+├── gitwhisper.ps1          # Unified script (Windows PowerShell)
+├── gitwhisper.sh           # Unified script (Linux/macOS Bash)
 ├── install.ps1             # Global install for PowerShell
 ├── install.sh              # Global install for Bash/Zsh
 ├── logo.png                # Project logo
@@ -410,25 +390,15 @@ GitWhisper/
 ### Script Sections
 
 ```
-commit-msg.ps1
-├── Parameters              # -Staged switch
-├── Git Validation          # Checks for .git directory
-├── Diff Parsing            # --name-status, --stat, content
-├── File Classification     # Added, modified, deleted, renamed
-├── Get-Scope               # Folder structure → scope
-├── Get-CommitType          # Type + description detection
-│   ├── Test Files          # .test., .spec.
-│   ├── Config Files        # package.json, Dockerfile, etc.
-│   ├── CI Files            # .github/workflows, .gitlab-ci
-│   ├── Doc Files           # .md, .txt, .rst
-│   ├── Style Files         # .css, .scss, .less
-│   ├── DB Files            # migration, schema, .sql
-│   ├── Diff Analysis       # imports, functions, classes, hooks
-│   └── Fallback Patterns   # error handling, logging, CSS, etc.
-├── Gitmoji Mapping         # Unicode escapes for PS 5.1
-├── Message Builder         # type(scope): description
-├── Truncate-Msg            # Enforce ≤50 chars
-└── Output                  # With/without emoji versions
+gitwhisper.ps1 / gitwhisper.sh
+├── invoke_commit           # Commit message generation
+│   ├── Diff Parsing        # --name-status, --stat, content
+│   ├── File Classification # Added, modified, deleted, renamed
+│   ├── get_scope           # Folder structure → scope
+│   ├── Commit Type Logic   # Type + description detection
+│   └── Output              # With/without emoji versions
+├── invoke_undo             # Undo last commit (soft/mixed reset)
+└── invoke_changelog        # CHANGELOG.md generator
 ```
 
 ## Configuration
@@ -459,6 +429,7 @@ function Truncate-Msg {
 |---|---|
 | **Windows PowerShell** | 5.1+ |
 | **PowerShell Core** | 7.0+ |
+| **Bash** | 4.0+ |
 | **Git** | 2.0+ |
 | **OS** | Windows, Linux, macOS |
 
