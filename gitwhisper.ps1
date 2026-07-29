@@ -79,6 +79,19 @@ function Invoke-Undo {
 }
 
 function Invoke-Commit {
+    $unstaged = git diff --name-only
+    $untracked = git ls-files --others --exclude-standard
+
+    if ($unstaged -or $untracked) {
+        Write-Host ""
+        Write-Host "  Unstaged changes detected." -ForegroundColor Yellow
+        $stageAll = Read-Host "  Stage all changes? (y/n)"
+        if ($stageAll -eq "y" -or $stageAll -eq "Y") {
+            git add -A
+            Write-Host "  All changes staged." -ForegroundColor Green
+        }
+    }
+
     $diffIndex = git diff --staged --name-status
     $diffStat = git diff --staged --stat
     $diffContent = git diff --staged

@@ -92,6 +92,19 @@ invoke_undo() {
 }
 
 invoke_commit() {
+    UNSTAGED=$(git diff --name-only)
+    UNTRACKED=$(git ls-files --others --exclude-standard)
+
+    if [[ -n "$UNSTAGED" || -n "$UNTRACKED" ]]; then
+        echo ""
+        echo -e "  \033[33mUnstaged changes detected.\033[0m"
+        read -p "  Stage all changes? (y/n): " STAGE_ALL
+        if [[ "$STAGE_ALL" == "y" || "$STAGE_ALL" == "Y" ]]; then
+            git add -A
+            echo -e "  \033[32mAll changes staged.\033[0m"
+        fi
+    fi
+
     DIFF_INDEX=$(git diff --staged --name-status)
     DIFF_STAT=$(git diff --staged --stat)
     DIFF_CONTENT=$(git diff --staged)
