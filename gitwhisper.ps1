@@ -25,6 +25,7 @@ function Show-Help {
     Write-Host "    gitwhisper               - generate commit message" -ForegroundColor Cyan
     Write-Host "    gitwhisper commit        - generate commit message" -ForegroundColor Cyan
     Write-Host "    gitwhisper undo          - undo last commit" -ForegroundColor Cyan
+    Write-Host "    gitwhisper amend        - amend last commit" -ForegroundColor Cyan
     Write-Host "    gitwhisper changelog     - generate changelog" -ForegroundColor Cyan
     Write-Host "    gitwhisper pr            - generate PR description" -ForegroundColor Cyan
     Write-Host "    gitwhisper pr --base main   - specify base branch" -ForegroundColor Cyan
@@ -102,6 +103,55 @@ function Invoke-Undo {
             Write-Host ""
             Write-Host "  Cancelled." -ForegroundColor Yellow
         }
+    }
+}
+
+function Invoke-Amend {
+    $lastMsg = git log -1 --format="%s" 2>$null
+    $lastBody = git log -1 --format="%b" 2>$null
+    if (-not $lastMsg) {
+        Write-Host "No commits to amend." -ForegroundColor Yellow
+        exit 0
+    }
+
+    Write-Host ""
+    Write-Host "=== Amend last commit ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Last message: $lastMsg" -ForegroundColor White
+    if ($lastBody) {
+        Write-Host "  Body:" -ForegroundColor DarkGray
+        $lastBody -split "`n" | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+    }
+    Write-Host ""
+
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    if ($lastBody) {
+        "$lastMsg`n`n$lastBody" | Out-File -FilePath $tempFile -Encoding UTF8
+    } else {
+        "$lastMsg`n" | Out-File -FilePath $tempFile -Encoding UTF8
+    }
+
+    Write-Host "  Opening editor to edit message..." -ForegroundColor Yellow
+    git commit --amend -F $tempFile
+    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host ""
+        Write-Host "  Commit amended!" -ForegroundColor Green
+        $push = Read-Host "  Force push? (y/n)"
+        if ($push -eq "y" -or $push -eq "Y") {
+            Write-Host ""
+            Write-Host "  Force pushing..." -ForegroundColor Cyan
+            git push --force-with-lease
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Pushed successfully!" -ForegroundColor Green
+            } else {
+                Write-Host "  Push failed." -ForegroundColor Red
+            }
+        }
+    } else {
+        Write-Host ""
+        Write-Host "  Amend failed." -ForegroundColor Red
     }
 }
 
@@ -202,7 +252,7 @@ function Invoke-Commit {
 
     $writeHost = [regex]::Matches($addedLines, 'Write-Host\s+"([^"]{5,50})"')
     if ($writeHost.Count -gt 0) {
-        $msgs = ($writeHost | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(Error|Warning|Pushing|Committing|Select|Cancel)" } | Select-Object -Unique | Select-Object -First 2) -join ", "
+        $msgs = ($writeHost | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(Error|Warning|Pushing|Committing|Select|Cancel)" } | ForEach-Object { $_ -replace '\s+', ' ' } | Select-Object -Unique | Select-Object -First 2) -join ", "
         if ($msgs) { $detailParts += "adds $msgs messages" }
     }
 
@@ -268,7 +318,7 @@ function Invoke-Commit {
         }
     }
 
-    $detailDesc = $detailParts -join " and "
+    $detailDesc = ($detailParts -join " and ") -replace '\s{2,}', ' '
 
     $gitmoji = @{}
     $gitmoji["feat"]     = [char]::ConvertFromUtf32(0x2728)
@@ -1123,6 +1173,7 @@ switch ($Command.ToLower()) {
     "" { Invoke-Commit }
     "commit" { Invoke-Commit }
     "undo" { Invoke-Undo }
+    "amend" { Invoke-Amend }
     "changelog" { Invoke-Changelog -SinceTag:$SinceTag -Limit $Limit }
     "pr" { Invoke-Pr -BaseBranch $Base -CreatePR ($ExtraArgs -contains "create") }
     default {
