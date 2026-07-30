@@ -662,14 +662,6 @@ invoke_commit() {
     if [[ "$EDIT_MSG" == "y" || "$EDIT_MSG" == "Y" ]]; then
         git commit -e -F "$TEMP_FILE"
     else
-        echo ""
-        read -p "  Proceed with commit? (y/n): " CONFIRM
-        if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
-            echo ""
-            echo -e "  \033[33mCancelled.\033[0m"
-            rm -f "$TEMP_FILE"
-            exit 0
-        fi
         git commit -F "$TEMP_FILE"
     fi
 

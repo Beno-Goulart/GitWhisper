@@ -427,14 +427,6 @@ function Invoke-Commit {
         $fullMsg | Out-File -FilePath $tempFile -Encoding UTF8
         git commit -e -F $tempFile
     } else {
-        Write-Host ""
-        $confirm = Read-Host "  Proceed with commit? (y/n)"
-        if ($confirm -ne "y" -and $confirm -ne "Y") {
-            Write-Host ""
-            Write-Host "  Cancelled." -ForegroundColor Yellow
-            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-            exit 0
-        }
         $fullMsg | Out-File -FilePath $tempFile -Encoding UTF8
         git commit -F $tempFile
     }
