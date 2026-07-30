@@ -362,15 +362,28 @@ function Invoke-Commit {
         return
     }
 
-    $confirm = Read-Host "  Proceed with commit? (y/n)"
-    if ($confirm -ne "y" -and $confirm -ne "Y") {
+    $fullMsg = "$selectedMsg`n`n$body"
+    $tempFile = [System.IO.Path]::GetTempFileName()
+
+    Write-Host ""
+    $edit = Read-Host "  Open editor to review? (y/n)"
+    if ($edit -eq "y" -or $edit -eq "Y") {
+        $fullMsg | Out-File -FilePath $tempFile -Encoding UTF8
+        git commit -e -F $tempFile
+    } else {
         Write-Host ""
-        Write-Host "  Cancelled." -ForegroundColor Yellow
-        exit 0
+        $confirm = Read-Host "  Proceed with commit? (y/n)"
+        if ($confirm -ne "y" -and $confirm -ne "Y") {
+            Write-Host ""
+            Write-Host "  Cancelled." -ForegroundColor Yellow
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+            exit 0
+        }
+        $fullMsg | Out-File -FilePath $tempFile -Encoding UTF8
+        git commit -F $tempFile
     }
 
-    $body = $bodyParts -join "`n"
-    git commit -m "$selectedMsg" -m "$body"
+    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""

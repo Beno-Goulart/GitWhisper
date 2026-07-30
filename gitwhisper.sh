@@ -590,15 +590,28 @@ invoke_commit() {
         return
     fi
 
-    read -p "  Proceed with commit? (y/n): " CONFIRM
-    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+    BODY=$(printf '%s\n' "${BODY_PARTS[@]}")
+    FULL_MSG="$SELECTED_MSG"$'\n'"$BODY"
+    TEMP_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-msg.txt")
+    echo "$FULL_MSG" > "$TEMP_FILE"
+
+    echo ""
+    read -p "  Open editor to review? (y/n): " EDIT_MSG
+    if [[ "$EDIT_MSG" == "y" || "$EDIT_MSG" == "Y" ]]; then
+        git commit -e -F "$TEMP_FILE"
+    else
         echo ""
-        echo -e "  \033[33mCancelled.\033[0m"
-        exit 0
+        read -p "  Proceed with commit? (y/n): " CONFIRM
+        if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+            echo ""
+            echo -e "  \033[33mCancelled.\033[0m"
+            rm -f "$TEMP_FILE"
+            exit 0
+        fi
+        git commit -F "$TEMP_FILE"
     fi
 
-    BODY=$(printf '%s\n' "${BODY_PARTS[@]}")
-    git commit -m "$SELECTED_MSG" -m "$BODY"
+    rm -f "$TEMP_FILE"
 
     if [[ $? -eq 0 ]]; then
         echo ""
