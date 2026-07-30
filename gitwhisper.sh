@@ -10,8 +10,11 @@ show_help() {
     echo "    gitwhisper               - generate commit message"
     echo "    gitwhisper commit        - generate commit message"
     echo "    gitwhisper undo          - undo last commit"
+    echo "    gitwhisper amend         - amend last commit"
     echo "    gitwhisper changelog     - generate changelog"
     echo "    gitwhisper help          - show this help"
+    echo "    gitwhisper pr            - generate PR description"
+    echo "    gitwhisper pr --base main   - specify base branch"
     echo "    gitwhisper --dry-run     - show message without committing"
     echo ""
     exit 0
@@ -41,8 +44,14 @@ case "$CMD" in
     undo)
         invoke_undo
         ;;
+    amend)
+        invoke_amend
+        ;;
     changelog)
         invoke_changelog "$@"
+        ;;
+    pr)
+        invoke_pr "$@"
         ;;
     *)
         echo "Unknown command: $CMD"
@@ -96,6 +105,57 @@ invoke_undo() {
             ;;
     esac
     exit 0
+}
+
+invoke_amend() {
+    LAST_MSG=$(git log -1 --format="%s" 2>/dev/null)
+    LAST_BODY=$(git log -1 --format="%b" 2>/dev/null)
+    if [[ -z "$LAST_MSG" ]]; then
+        echo -e "\033[33mNo commits to amend.\033[0m"
+        exit 0
+    fi
+
+    echo ""
+    echo -e "\033[36m=== Amend last commit ===\033[0m"
+    echo ""
+    echo -e "  Last message: \033[37m$LAST_MSG\033[0m"
+    if [[ -n "$LAST_BODY" ]]; then
+        echo -e "  \033[90mBody:\033[0m"
+        while IFS= read -r line; do
+            echo -e "  \033[90m  $line\033[0m"
+        done <<< "$LAST_BODY"
+    fi
+    echo ""
+
+    TEMP_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-msg.txt")
+    if [[ -n "$LAST_BODY" ]]; then
+        printf '%s\n\n%s\n' "$LAST_MSG" "$LAST_BODY" > "$TEMP_FILE"
+    else
+        printf '%s\n' "$LAST_MSG" > "$TEMP_FILE"
+    fi
+
+    echo -e "  \033[33mOpening editor to edit message...\033[0m"
+    git commit --amend -F "$TEMP_FILE"
+    rm -f "$TEMP_FILE"
+
+    if [[ $? -eq 0 ]]; then
+        echo ""
+        echo -e "  \033[32mCommit amended!\033[0m"
+        read -p "  Force push? (y/n): " PUSH_AMEND
+        if [[ "$PUSH_AMEND" == "y" || "$PUSH_AMEND" == "Y" ]]; then
+            echo ""
+            echo -e "  \033[36mForce pushing...\033[0m"
+            git push --force-with-lease
+            if [[ $? -eq 0 ]]; then
+                echo -e "  \033[32mPushed successfully!\033[0m"
+            else
+                echo -e "  \033[31mPush failed.\033[0m"
+            fi
+        fi
+    else
+        echo ""
+        echo -e "  \033[31mAmend failed.\033[0m"
+    fi
 }
 
 invoke_commit() {
@@ -309,11 +369,18 @@ invoke_commit() {
     BASH_FUNCS=$(echo "$ADDED_LINES" | grep -oE '[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)\s*\{' | grep -oE '^[a-zA-Z_]+' | grep -vE '^(contains_pattern|count_matches)$' | head -3 | tr '\n' ', ' | sed 's/,$//')
     [[ -n "$BASH_FUNCS" ]] && SPECIFIC_PARTS+=("adds $BASH_FUNCS function")
 
-    GIT_OPS=$(echo "$ADDED_LINES" | grep -oE 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | grep -oE '(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | head -3 | tr '\n' ', ' | sed 's/,$//')
-    [[ -n "$GIT_OPS" ]] && SPECIFIC_PARTS+=("adds git $GIT_OPS")
+    HAS_HIGH_PRIORITY=false
+    [[ ${#SPECIFIC_PARTS[@]} -ge 2 ]] && HAS_HIGH_PRIORITY=true
 
-    ECHO_MSGS=$(echo "$ADDED_LINES" | grep -oE 'echo -e?\s+"[^"]{5,50}"' | grep -oE '"[^"]*"' | tr -d '"' | grep -vE '^(Error|Warning|Pushing|Committing|Select|Cancel|Changes|===)' | head -2 | tr '\n' ', ' | sed 's/,$//')
-    [[ -n "$ECHO_MSGS" ]] && SPECIFIC_PARTS+=("adds $ECHO_MSGS messages")
+    if [[ "$HAS_HIGH_PRIORITY" == false ]]; then
+        GIT_OPS=$(echo "$ADDED_LINES" | grep -oE 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | grep -oE '(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | head -3 | tr '\n' ', ' | sed 's/,$//')
+        [[ -n "$GIT_OPS" ]] && SPECIFIC_PARTS+=("adds git $GIT_OPS")
+    fi
+
+    if [[ "$HAS_HIGH_PRIORITY" == false ]]; then
+        ECHO_MSGS=$(echo "$ADDED_LINES" | grep -oE 'echo -e?\s+"[^"]{5,50}"' | grep -oE '"[^"]*"' | tr -d '"' | sed 's/  */ /g' | grep -vE '^(Error|Warning|Pushing|Committing|Select|Cancel|Changes|===)' | head -2 | tr '\n' ', ' | sed 's/,$//')
+        [[ -n "$ECHO_MSGS" ]] && SPECIFIC_PARTS+=("adds $ECHO_MSGS messages")
+    fi
 
     if echo "$ADDED_LINES" | grep -qE '(import|require)\s*\{?\s*[A-Za-z]'; then
         IMPORT_NAMES=$(echo "$ADDED_LINES" | grep -oE '(import|require)\s*\{?\s*[A-Za-z]+' | grep -oE '[A-Za-z]+$' | head -3 | tr '\n' ', ' | sed 's/,$//')
@@ -367,7 +434,7 @@ invoke_commit() {
 
     SPECIFIC_DESC=""
     if [[ ${#SPECIFIC_PARTS[@]} -gt 0 ]]; then
-        SPECIFIC_DESC=$(printf ' and %s' "${SPECIFIC_PARTS[@]}")
+        SPECIFIC_DESC=$(printf ' and %s' "${SPECIFIC_PARTS[@]}" | sed 's/  */ /g')
         SPECIFIC_DESC="${SPECIFIC_DESC:4}"
     fi
 
@@ -585,15 +652,20 @@ invoke_commit() {
         return
     fi
 
-    read -p "  Proceed with commit? (y/n): " CONFIRM
-    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
-        echo ""
-        echo -e "  \033[33mCancelled.\033[0m"
-        exit 0
+    BODY=$(printf '%s\n' "${BODY_PARTS[@]}")
+    FULL_MSG="$SELECTED_MSG"$'\n'"$BODY"
+    TEMP_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-msg.txt")
+    echo "$FULL_MSG" > "$TEMP_FILE"
+
+    echo ""
+    read -p "  Open editor to review? (y/n): " EDIT_MSG
+    if [[ "$EDIT_MSG" == "y" || "$EDIT_MSG" == "Y" ]]; then
+        git commit -e -F "$TEMP_FILE"
+    else
+        git commit -F "$TEMP_FILE"
     fi
 
-    BODY=$(printf '%s\n' "${BODY_PARTS[@]}")
-    git commit -m "$SELECTED_MSG" -m "$BODY"
+    rm -f "$TEMP_FILE"
 
     if [[ $? -eq 0 ]]; then
         echo ""
@@ -770,4 +842,203 @@ invoke_changelog() {
         echo "  $line"
     done
     echo -e "  \033[90m...\033[0m"
+}
+
+invoke_pr() {
+    BASE_BRANCH=""
+    CREATE_PR=false
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --base) BASE_BRANCH="$2"; shift 2 ;;
+            create) CREATE_PR=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+    if [[ -z "$BRANCH" ]]; then
+        echo -e "\033[31mError: Not on a branch.\033[0m"
+        exit 1
+    fi
+
+    if [[ -z "$BASE_BRANCH" ]]; then
+        for try in main master develop; do
+            if git rev-parse --verify "$try" &>/dev/null; then
+                BASE_BRANCH="$try"
+                break
+            fi
+        done
+        if [[ -z "$BASE_BRANCH" ]]; then
+            echo -e "\033[31mError: Could not detect base branch. Use --base.\033[0m"
+            exit 1
+        fi
+    fi
+
+    MERGE_BASE=$(git merge-base "$BASE_BRANCH" "$BRANCH" 2>/dev/null)
+    if [[ -z "$MERGE_BASE" ]]; then
+        echo -e "\033[31mError: Branches $BASE_BRANCH and $BRANCH have no common ancestor.\033[0m"
+        exit 1
+    fi
+
+    LOG=$(git log "$MERGE_BASE..$BRANCH" --pretty=format:"%H|%s|%ad" --date=short --no-merges 2>/dev/null)
+    if [[ -z "$LOG" ]]; then
+        echo -e "\033[33mNo commits found between $BASE_BRANCH and $BRANCH.\033[0m"
+        exit 0
+    fi
+
+    declare -a FEAT=() FIX=() PERF=() REFACTOR=() DOCS=() TEST=()
+    declare -a BUILD=() CI=() CHORE=() STYLE=() REVERT=() OTHER=()
+    TOTAL=0
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        HASH=$(echo "$line" | cut -d'|' -f1)
+        MESSAGE=$(echo "$line" | cut -d'|' -f2)
+        SHORT_HASH="${HASH:0:7}"
+
+        TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+\(' | head -1 | tr -d '(')
+        if [[ -z "$TYPE" ]]; then
+            TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+:' | head -1 | tr -d ':')
+        fi
+        SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | tr -d '()')
+        DESC=$(echo "$MESSAGE" | sed 's/.*:[[:space:]]*//')
+
+        ENTRY="- "
+        if [[ -n "$SCOPE" ]]; then
+            ENTRY+="**${SCOPE}:** "
+        fi
+        ENTRY+="${DESC} (\`${SHORT_HASH}\`)"
+
+        case "$TYPE" in
+            feat)     FEAT+=("$ENTRY") ;;
+            fix)      FIX+=("$ENTRY") ;;
+            perf)     PERF+=("$ENTRY") ;;
+            refactor) REFACTOR+=("$ENTRY") ;;
+            docs)     DOCS+=("$ENTRY") ;;
+            test)     TEST+=("$ENTRY") ;;
+            build)    BUILD+=("$ENTRY") ;;
+            ci)       CI+=("$ENTRY") ;;
+            chore)    CHORE+=("$ENTRY") ;;
+            style)    STYLE+=("$ENTRY") ;;
+            revert)   REVERT+=("$ENTRY") ;;
+            *)        OTHER+=("$ENTRY") ;;
+        esac
+        ((TOTAL++))
+    done <<< "$LOG"
+
+    if [[ $TOTAL -eq 0 ]]; then
+        echo -e "\033[33mNo conventional commits found.\033[0m"
+        exit 0
+    fi
+
+    SUMMARY="Updates codebase"
+    if [[ ${#FEAT[@]} -gt 0 || ${#FIX[@]} -gt 0 ]]; then
+        SUMMARY_PARTS=()
+        [[ ${#FEAT[@]} -gt 0 ]] && SUMMARY_PARTS+=("adds new features")
+        [[ ${#FIX[@]} -gt 0 ]] && SUMMARY_PARTS+=("fixes bugs")
+        [[ ${#REFACTOR[@]} -gt 0 ]] && SUMMARY_PARTS+=("refactors codebase")
+        SUMMARY=$(printf '%s; ' "${SUMMARY_PARTS[@]}")
+        SUMMARY="${SUMMARY%; }"
+        SUMMARY="$(tr '[:lower:]' '[:upper:]' <<< "${SUMMARY:0:1}")${SUMMARY:1}"
+    fi
+
+    PR_BODY="## Summary"
+    PR_BODY+=$'\n'"$SUMMARY"
+    PR_BODY+=$'\n'""
+    PR_BODY+=$'\n'"## Changes"
+    PR_BODY+=$'\n'""
+
+    write_pr_section() {
+        local emoji="$1"
+        local title="$2"
+        shift 2
+        local arr=("$@")
+        if [[ ${#arr[@]} -gt 0 ]]; then
+            PR_BODY+=$'\n'"### $title"
+            PR_BODY+=$'\n'""
+            for entry in "${arr[@]}"; do
+                PR_BODY+=$'\n'"$emoji $entry"
+            done
+            PR_BODY+=$'\n'""
+        fi
+    }
+
+    write_pr_section "✨" "Features" "${FEAT[@]}"
+    write_pr_section "🐛" "Bug Fixes" "${FIX[@]}"
+    write_pr_section "⚡" "Performance" "${PERF[@]}"
+    write_pr_section "♻️" "Refactoring" "${REFACTOR[@]}"
+    write_pr_section "📝" "Documentation" "${DOCS[@]}"
+    write_pr_section "✅" "Tests" "${TEST[@]}"
+    write_pr_section "🔧" "Build" "${BUILD[@]}"
+    write_pr_section "👷" "CI/CD" "${CI[@]}"
+    write_pr_section "🔨" "Chores" "${CHORE[@]}"
+    write_pr_section "💄" "Style" "${STYLE[@]}"
+    write_pr_section "⏪" "Reverts" "${REVERT[@]}"
+    write_pr_section "📦" "Other" "${OTHER[@]}"
+
+    PR_BODY+=$'\n'"---"
+    PR_BODY+=$'\n'"**Branch:** $BRANCH → $BASE_BRANCH"
+    PR_BODY+=$'\n'"**Commits:** $TOTAL"
+
+    echo ""
+    echo -e "\033[32m=== PR Description ===\033[0m"
+    echo ""
+    while IFS= read -r line; do
+        echo "  $line"
+    done <<< "$PR_BODY"
+    echo ""
+
+    if [[ "$CREATE_PR" != true ]]; then
+        read -p "  Copy to clipboard? (y/n): " COPY
+        if [[ "$COPY" == "y" || "$COPY" == "Y" ]]; then
+            if command -v clip.exe &>/dev/null; then
+                echo "$PR_BODY" | clip.exe
+            elif command -v xclip &>/dev/null; then
+                echo "$PR_BODY" | xclip -selection clipboard
+            elif command -v pbcopy &>/dev/null; then
+                echo "$PR_BODY" | pbcopy
+            else
+                echo ""
+                echo -e "  \033[33mNo clipboard tool found. Copy manually:\033[0m"
+                echo "$PR_BODY"
+                return
+            fi
+            echo ""
+            echo -e "  \033[32mCopied to clipboard!\033[0m"
+        fi
+    fi
+
+    echo ""
+    if [[ "$CREATE_PR" == true ]]; then
+        CREATE_NOW="y"
+    else
+        read -p "  Create PR now? (y/n): " CREATE_NOW
+    fi
+    if [[ "$CREATE_NOW" == "y" || "$CREATE_NOW" == "Y" ]]; then
+        if command -v gh &>/dev/null; then
+            TITLE="${FEAT[0]:-$BRANCH}"
+            echo "$PR_BODY" | gh pr create --title "$TITLE" --body - --base "$BASE_BRANCH" --head "$BRANCH"
+            if [[ $? -eq 0 ]]; then
+                echo ""
+                echo -e "  \033[32mPR created successfully!\033[0m"
+            else
+                echo ""
+                echo -e "  \033[31mPR creation failed.\033[0m"
+            fi
+        else
+            REMOTE_URL=$(git remote get-url origin 2>/dev/null)
+            if [[ -n "$REMOTE_URL" ]]; then
+                REPO=$(echo "$REMOTE_URL" | sed -E 's|.*[:/]([^/]+/[^/.]+)(\.git)?$|\1|')
+                URL="https://github.com/$REPO/compare/$BASE_BRANCH...$BRANCH"
+                echo ""
+                echo -e "  \033[33mgh CLI not found. Opening browser...\033[0m"
+                if command -v xdg-open &>/dev/null; then
+                    xdg-open "$URL"
+                elif command -v open &>/dev/null; then
+                    open "$URL"
+                fi
+            fi
+        fi
+    fi
 }
