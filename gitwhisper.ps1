@@ -244,16 +244,22 @@ function Invoke-Commit {
         if ($names) { $detailParts += "adds $names function" }
     }
 
-    $gitOps = [regex]::Matches($addedLines, 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)')
-    if ($gitOps.Count -gt 0) {
-        $ops = ($gitOps | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
-        $detailParts += "adds git $ops"
+    $hasHighPriority = $detailParts.Count -ge 2
+
+    if (-not $hasHighPriority) {
+        $gitOps = [regex]::Matches($addedLines, 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)')
+        if ($gitOps.Count -gt 0) {
+            $ops = ($gitOps | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+            $detailParts += "adds git $ops"
+        }
     }
 
-    $writeHost = [regex]::Matches($addedLines, 'Write-Host\s+"([^"]{5,50})"')
-    if ($writeHost.Count -gt 0) {
-        $msgs = ($writeHost | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(Error|Warning|Pushing|Committing|Select|Cancel)" } | ForEach-Object { $_ -replace '\s+', ' ' } | Select-Object -Unique | Select-Object -First 2) -join ", "
-        if ($msgs) { $detailParts += "adds $msgs messages" }
+    if (-not $hasHighPriority) {
+        $writeHost = [regex]::Matches($addedLines, 'Write-Host\s+"([^"]{5,50})"')
+        if ($writeHost.Count -gt 0) {
+            $msgs = ($writeHost | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(Error|Warning|Pushing|Committing|Select|Cancel)" } | ForEach-Object { $_ -replace '\s+', ' ' } | Select-Object -Unique | Select-Object -First 2) -join ", "
+            if ($msgs) { $detailParts += "adds $msgs messages" }
+        }
     }
 
     $addedImports = [regex]::Matches($addedLines, "(?:import|require)\s*\{?\s*([\w]+)")
@@ -318,7 +324,7 @@ function Invoke-Commit {
         }
     }
 
-    $detailDesc = ($detailParts -join " and ") -replace '\s{2,}', ' '
+    $detailDesc = ($detailParts | Select-Object -First 2 | ForEach-Object { $_ -replace '\s{2,}', ' ' } | Select-Object -Unique) -join " and "
 
     $gitmoji = @{}
     $gitmoji["feat"]     = [char]::ConvertFromUtf32(0x2728)
@@ -412,7 +418,7 @@ function Invoke-Commit {
         return
     }
 
-    $fullMsg = "$selectedMsg`n`n$body"
+    $fullMsg = "$selectedMsg`n`n$($bodyParts -join "`n")"
     $tempFile = [System.IO.Path]::GetTempFileName()
 
     Write-Host ""

@@ -369,11 +369,18 @@ invoke_commit() {
     BASH_FUNCS=$(echo "$ADDED_LINES" | grep -oE '[a-zA-Z_][a-zA-Z0-9_]*\s*\(\)\s*\{' | grep -oE '^[a-zA-Z_]+' | grep -vE '^(contains_pattern|count_matches)$' | head -3 | tr '\n' ', ' | sed 's/,$//')
     [[ -n "$BASH_FUNCS" ]] && SPECIFIC_PARTS+=("adds $BASH_FUNCS function")
 
-    GIT_OPS=$(echo "$ADDED_LINES" | grep -oE 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | grep -oE '(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | head -3 | tr '\n' ', ' | sed 's/,$//')
-    [[ -n "$GIT_OPS" ]] && SPECIFIC_PARTS+=("adds git $GIT_OPS")
+    HAS_HIGH_PRIORITY=false
+    [[ ${#SPECIFIC_PARTS[@]} -ge 2 ]] && HAS_HIGH_PRIORITY=true
 
-    ECHO_MSGS=$(echo "$ADDED_LINES" | grep -oE 'echo -e?\s+"[^"]{5,50}"' | grep -oE '"[^"]*"' | tr -d '"' | sed 's/  */ /g' | grep -vE '^(Error|Warning|Pushing|Committing|Select|Cancel|Changes|===)' | head -2 | tr '\n' ', ' | sed 's/,$//')
-    [[ -n "$ECHO_MSGS" ]] && SPECIFIC_PARTS+=("adds $ECHO_MSGS messages")
+    if [[ "$HAS_HIGH_PRIORITY" == false ]]; then
+        GIT_OPS=$(echo "$ADDED_LINES" | grep -oE 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | grep -oE '(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)' | head -3 | tr '\n' ', ' | sed 's/,$//')
+        [[ -n "$GIT_OPS" ]] && SPECIFIC_PARTS+=("adds git $GIT_OPS")
+    fi
+
+    if [[ "$HAS_HIGH_PRIORITY" == false ]]; then
+        ECHO_MSGS=$(echo "$ADDED_LINES" | grep -oE 'echo -e?\s+"[^"]{5,50}"' | grep -oE '"[^"]*"' | tr -d '"' | sed 's/  */ /g' | grep -vE '^(Error|Warning|Pushing|Committing|Select|Cancel|Changes|===)' | head -2 | tr '\n' ', ' | sed 's/,$//')
+        [[ -n "$ECHO_MSGS" ]] && SPECIFIC_PARTS+=("adds $ECHO_MSGS messages")
+    fi
 
     if echo "$ADDED_LINES" | grep -qE '(import|require)\s*\{?\s*[A-Za-z]'; then
         IMPORT_NAMES=$(echo "$ADDED_LINES" | grep -oE '(import|require)\s*\{?\s*[A-Za-z]+' | grep -oE '[A-Za-z]+$' | head -3 | tr '\n' ', ' | sed 's/,$//')
