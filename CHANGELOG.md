@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
-## [0.2.0](2026-07-27)
+## [0.2.0](2026-07-30)
 
 ### Features
 
@@ -16,6 +16,12 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 
 ### Refactoring
 
+- **auth:** updates scripts (gitwhisper, gitwhisper) (d2879df)
+- **auth:** updates scripts (gitwhisper, gitwhisper) (0c1dd27)
+- **auth:** adds Invoke-Amend function and adds invoke_amend function and adds git log, commit, push and adds gitwhisper amend - amend last commit, No commits to amend. messages (b92fe2f)
+- **auth:** adds git commit and adds   Cancelled. messages (3a73ee2)
+- **auth:** adds --base flag and adds Invoke-Pr function and adds invoke_pr, write_pr_section function and adds git diff, add, commit and adds   Unstaged changes detected.,   All changes staged. messages (37b927d)
+- **auth:** adds -Msg parameter and adds --help, h flag and adds Show-Help, Invoke-Undo, Invoke-Commit function and adds show_help, invoke_undo, invoke_commit function and adds git diff, commit, push and adds === GitWhisper ===,   Usage: messages (61d7b02)
 - **auth:** adds --undo, u flag and adds s import (9267082)
 - **auth:** updates 4 files in CHANGELOG, README (36abe1f)
 - **auth:** adds Get (b91f4e3)
@@ -27,6 +33,7 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 
 ### Documentation
 
+- **CHANGELOG:** updates CHANGELOG.md (e01d225)
 - **README:** adds git pull (f4a0993)
 - **README:** updates README.md (21d9d85)
 - **README:** updates README.md (3e666f8)
