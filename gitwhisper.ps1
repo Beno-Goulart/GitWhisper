@@ -35,7 +35,7 @@ function Show-Help {
     exit 0
 }
 
-if ($DryRun -or $Command -eq "--dry-run" -or $Command -eq "-n") {
+if ($DryRun -or $Command -eq "--dry-run" -or $Command -eq "-n" -or ($ExtraArgs -contains "--dry-run") -or ($ExtraArgs -contains "-n")) {
     $DryRun = $true
     $Command = ""
 }
@@ -153,6 +153,37 @@ function Invoke-Amend {
         Write-Host ""
         Write-Host "  Amend failed." -ForegroundColor Red
     }
+}
+
+function Edit-MessageBody {
+    param([string[]]$Body)
+
+    $editedBody = @()
+    $i = 0
+    while ($i -lt $Body.Count) {
+        Write-Host ""
+        Write-Host "  [$($i + 1)] $($Body[$i])" -ForegroundColor DarkGray
+        $editLine = Read-Host "  Edit (Enter=keep, '.'=delete, '+$=add after)"
+        if ($editLine -eq ".") {
+            $i++
+            continue
+        }
+        if ($editLine -eq "+") {
+            $editedBody += $Body[$i]
+            $newLine = Read-Host "  New line"
+            if ($newLine) { $editedBody += $newLine }
+            $i++
+            continue
+        }
+        if ($editLine -eq "") {
+            $editedBody += $Body[$i]
+        } else {
+            $editedBody += $editLine
+        }
+        $i++
+    }
+    Write-Host ""
+    $editedBody
 }
 
 function Invoke-Commit {
@@ -406,28 +437,74 @@ function Invoke-Commit {
         $bodyParts += "Details: $detailDesc"
     }
 
-    Write-Host ""
-    Write-Host "  Body:" -ForegroundColor Cyan
-    foreach ($bl in $bodyParts) {
-        Write-Host "    $bl"
-    }
-    Write-Host ""
-
     if ($DryRun) {
         Write-Host "  [DRY-RUN] Commit skipped." -ForegroundColor DarkGray
         return
     }
 
-    $fullMsg = "$selectedMsg`n`n$($bodyParts -join "`n")"
+    $finalTitle = $selectedMsg
+    $finalBody = @($bodyParts)
+
+    :previewLoop while ($true) {
+        $openEditor = $false
+
+        Write-Host ""
+        Write-Host "=== Commit preview ===" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "  $finalTitle" -ForegroundColor White
+        if ($finalBody.Count -gt 0) {
+            Write-Host ""
+            foreach ($bl in $finalBody) {
+                Write-Host "  $bl" -ForegroundColor Gray
+            }
+        }
+        Write-Host ""
+        Write-Host "  [1] Commit as-is" -ForegroundColor White
+        Write-Host "  [2] Edit subject" -ForegroundColor White
+        Write-Host "  [3] Edit body" -ForegroundColor White
+        Write-Host "  [4] Open in editor" -ForegroundColor White
+        Write-Host "  [0] Cancel" -ForegroundColor DarkGray
+        Write-Host ""
+
+        $action = Read-Host "  Choose (0-4)"
+        if (-not $action) {
+            Write-Host ""
+            Write-Host "  Cancelled." -ForegroundColor Yellow
+            exit 0
+        }
+        switch ($action) {
+            "1" { break previewLoop }
+            "2" {
+                Write-Host ""
+                Write-Host "  Subject: $finalTitle" -ForegroundColor DarkGray
+                $newTitle = Read-Host "  New subject (Enter to keep)"
+                if ($newTitle) { $finalTitle = $newTitle }
+            }
+            "3" {
+                $finalBody = @(Edit-MessageBody -Body $finalBody)
+            }
+            "4" {
+                $openEditor = $true
+                break previewLoop
+            }
+            default {
+                Write-Host ""
+                Write-Host "  Cancelled." -ForegroundColor Yellow
+                exit 0
+            }
+        }
+    }
+
+    $fullMsg = "$finalTitle`n`n$($finalBody -join "`n")"
     $tempFile = [System.IO.Path]::GetTempFileName()
 
-    Write-Host ""
-    $edit = Read-Host "  Open editor to review? (y/n)"
-    if ($edit -eq "y" -or $edit -eq "Y") {
-        $fullMsg | Out-File -FilePath $tempFile -Encoding UTF8
+    [System.IO.File]::WriteAllText($tempFile, $fullMsg, [System.Text.UTF8Encoding]::new($false))
+
+    if ($openEditor) {
+        Write-Host ""
+        Write-Host "  Opening editor..." -ForegroundColor Yellow
         git commit -e -F $tempFile
     } else {
-        $fullMsg | Out-File -FilePath $tempFile -Encoding UTF8
         git commit -F $tempFile
     }
 

@@ -158,6 +158,29 @@ invoke_amend() {
     fi
 }
 
+edit_message_body() {
+    local -a body=("$@")
+    local -a edited_body=()
+    local i edit_line new_line
+    for ((i=0; i<${#body[@]}; i++)); do
+        echo ""
+        echo -e "  \033[90m[$((i+1))]\033[0m ${body[$i]}"
+        read -p "  Edit (Enter=keep, '.=delete, '+=add after): " edit_line
+        if [[ "$edit_line" == "." ]]; then
+            continue
+        elif [[ "$edit_line" == "+" ]]; then
+            edited_body+=("${body[$i]}")
+            read -p "  New line: " new_line
+            [[ -n "$new_line" ]] && edited_body+=("$new_line")
+        elif [[ -z "$edit_line" ]]; then
+            edited_body+=("${body[$i]}")
+        else
+            edited_body+=("$edit_line")
+        fi
+    done
+    printf '%s\n' "${edited_body[@]}"
+}
+
 invoke_commit() {
     UNSTAGED=$(git diff --name-only)
     UNTRACKED=$(git ls-files --others --exclude-standard)
@@ -640,26 +663,71 @@ invoke_commit() {
         BODY_PARTS+=("Details: $SPECIFIC_DESC")
     fi
 
-    echo ""
-    echo -e "  \033[36mBody:\033[0m"
-    for bl in "${BODY_PARTS[@]}"; do
-        echo "    $bl"
-    done
-    echo ""
-
     if [[ "$DRY_RUN" == true ]]; then
         echo -e "  \033[90m[DRY-RUN] Commit skipped.\033[0m"
         return
     fi
 
-    BODY=$(printf '%s\n' "${BODY_PARTS[@]}")
-    FULL_MSG="$SELECTED_MSG"$'\n'"$BODY"
+    FINAL_TITLE="$SELECTED_MSG"
+    mapfile -t FINAL_BODY < <(printf '%s\n' "${BODY_PARTS[@]}")
+
+    while true; do
+        OPEN_EDITOR=false
+
+        echo ""
+        echo -e "\033[32m=== Commit preview ===\033[0m"
+        echo ""
+        echo -e "  \033[37m$FINAL_TITLE\033[0m"
+        if [[ ${#FINAL_BODY[@]} -gt 0 ]]; then
+            echo ""
+            for bl in "${FINAL_BODY[@]}"; do
+                echo "  $bl"
+            done
+        fi
+        echo ""
+        echo "  [1] Commit as-is"
+        echo "  [2] Edit subject"
+        echo "  [3] Edit body"
+        echo "  [4] Open in editor"
+        echo -e "  [0] \033[90mCancel\033[0m"
+        echo ""
+        read -p "  Choose (0-4): " ACT
+        if [[ -z "$ACT" ]]; then
+            echo ""
+            echo -e "  \033[33mCancelled.\033[0m"
+            exit 0
+        fi
+        case "$ACT" in
+            1) break ;;
+            2)
+                echo ""
+                echo -e "  \033[90mSubject: $FINAL_TITLE\033[0m"
+                read -p "  New subject (Enter to keep): " NEW_TITLE
+                [[ -n "$NEW_TITLE" ]] && FINAL_TITLE="$NEW_TITLE"
+                ;;
+            3)
+                mapfile -t FINAL_BODY < <(edit_message_body "${FINAL_BODY[@]}")
+                ;;
+            4)
+                OPEN_EDITOR=true
+                break
+                ;;
+            *)
+                echo ""
+                echo -e "  \033[33mCancelled.\033[0m"
+                exit 0
+                ;;
+        esac
+    done
+
+    BODY=$(printf '%s\n' "${FINAL_BODY[@]}")
+    FULL_MSG="$FINAL_TITLE"$'\n'"$BODY"
     TEMP_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-msg.txt")
     echo "$FULL_MSG" > "$TEMP_FILE"
 
-    echo ""
-    read -p "  Open editor to review? (y/n): " EDIT_MSG
-    if [[ "$EDIT_MSG" == "y" || "$EDIT_MSG" == "Y" ]]; then
+    if [[ "$OPEN_EDITOR" == true ]]; then
+        echo ""
+        echo -e "  \033[33mOpening editor...\033[0m"
         git commit -e -F "$TEMP_FILE"
     else
         git commit -F "$TEMP_FILE"
