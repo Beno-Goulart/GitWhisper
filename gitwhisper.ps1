@@ -17,6 +17,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# GitHub usernames that belong to the project maintainers.
+# They are excluded from the "community contributors" section.
+$coreMaintainers = @()
+
 function Show-Help {
     Write-Host ""
     Write-Host "=== GitWhisper ===" -ForegroundColor Cyan
@@ -29,6 +33,7 @@ function Show-Help {
     Write-Host "    gitwhisper changelog     - generate changelog" -ForegroundColor Cyan
     Write-Host "    gitwhisper release       - create release (changelog + tag)" -ForegroundColor Cyan
     Write-Host "    gitwhisper release --push    - push commit and tag after release" -ForegroundColor Cyan
+    Write-Host "    gitwhisper release --github  - also publish a GitHub Release (gh CLI)" -ForegroundColor Cyan
     Write-Host "    gitwhisper release --minor   - force minor bump (major/minor/patch)" -ForegroundColor Cyan
     Write-Host "    gitwhisper release --version 1.2.3 - use explicit version" -ForegroundColor Cyan
     Write-Host "    gitwhisper pr            - generate PR description" -ForegroundColor Cyan
@@ -1092,13 +1097,13 @@ function Invoke-Changelog {
         } catch { $lastTag = "" }
 
         if ($lastTag) {
-            $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad" --date=short
+            $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short
         } else {
             Write-Host "No tags found. Showing all commits." -ForegroundColor Yellow
-            $log = git log --pretty=format:"%H|%s|%ad" --date=short -n $Limit
+            $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n $Limit
         }
     } else {
-        $log = git log --pretty=format:"%H|%s|%ad" --date=short -n $Limit
+        $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n $Limit
     }
 
     if (-not $log) {
@@ -1126,12 +1131,14 @@ function Invoke-Changelog {
     foreach ($line in ($log -split "`n")) {
         if (-not $line -or $line -eq "") { continue }
 
-        $parts = $line -split "\|", 3
-        if ($parts.Count -lt 3) { continue }
+        $parts = $line -split "\|", 5
+        if ($parts.Count -lt 5) { continue }
 
         $hash = $parts[0].Trim()
         $message = $parts[1].Trim()
         $date = $parts[2].Trim()
+        $authorName = $parts[3].Trim()
+        $authorEmail = $parts[4].Trim()
 
         $typeMatch = [regex]::Match($message, "(\w+)(?:\(([^)]+)\))?[!]?:\s*(.+)")
         if ($typeMatch.Success) {
@@ -1140,12 +1147,22 @@ function Invoke-Changelog {
             $desc = $typeMatch.Groups[3].Value
             $shortHash = $hash.Substring(0, [Math]::Min(7, $hash.Length))
 
+            $pr = ""
+            $prMatch = [regex]::Match($desc, "\(#(\d+)\)\s*$")
+            if ($prMatch.Success) {
+                $pr = $prMatch.Groups[1].Value
+                $desc = $desc.Substring(0, $prMatch.Index).TrimEnd()
+            }
+
             $commitObj = @{
                 Hash = $shortHash
                 Message = $message
                 Scope = $scope
                 Description = $desc
+                Type = $type
                 Date = $date
+                Pr = $pr
+                AuthorUser = (Get-GithubUsername -Name $authorName -Email $authorEmail)
             }
 
             if ($types.ContainsKey($type)) {
@@ -1210,25 +1227,7 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 
     $changelog += "## [$newVersion]($today)`n`n"
 
-    foreach ($type in @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")) {
-        $typeData = $types[$type]
-        if ($typeData.Commits.Count -gt 0) {
-            $changelog += "### $($typeData.Title)`n`n"
-            foreach ($commit in $typeData.Commits) {
-                $cHash = $commit.Hash
-                $cScope = $commit.Scope
-                $cDesc = $commit.Description
-                if ($cScope) {
-                    $line = "- **${cScope}:** ${cDesc} (${cHash})"
-                    $changelog += $line + [char]10
-                } else {
-                    $line = "- ${cDesc} (${cHash})"
-                    $changelog += $line + [char]10
-                }
-            }
-            $changelog += [char]10
-        }
-    }
+    $changelog += (Build-ReleaseNotes -Types $types -AllCommits $allCommits)
 
     $changelog | Out-File -FilePath "CHANGELOG.md" -Encoding UTF8
 
@@ -1250,16 +1249,118 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
     }
 }
 
+function Get-GithubUsername {
+    param([string]$Name, [string]$Email)
+
+    if ($Email -match "^([^@+]+)(\+[^@]*)?@users\.noreply\.github\.com$") {
+        $u = $Matches[1]
+        if ($u -match "^[a-zA-Z0-9-]+$") { return $u }
+    }
+    if ($Name -match "^@([a-zA-Z0-9-]+)$") { return $Matches[1] }
+    if ($Name -match "^[a-zA-Z0-9-]+$") { return $Name }
+    return ""
+}
+
+function Format-ReleaseBullet {
+    param($Commit)
+
+    $line = "- $($Commit.Description)"
+    if ($Commit.Pr) { $line += " (#$($Commit.Pr))" }
+    return $line
+}
+
+function Build-ReleaseNotes {
+    param(
+        [hashtable]$Types,
+        [array]$AllCommits
+    )
+
+    $areas = @{}
+    foreach ($c in $AllCommits) {
+        $area = if ($c.Scope) { $c.Scope } else { "General" }
+        if (-not $areas.ContainsKey($area)) { $areas[$area] = @{} }
+        if (-not $areas[$area].ContainsKey($c.Type)) { $areas[$area][$c.Type] = @() }
+        $areas[$area][$c.Type] += $c
+    }
+
+    $areaStats = @()
+    foreach ($key in $areas.Keys) {
+        $count = 0
+        foreach ($list in $areas[$key].Values) { $count += $list.Count }
+        $areaStats += [PSCustomObject]@{ Name = $key; Count = $count }
+    }
+    $areaOrder = @($areaStats | Where-Object { $_.Name -ne "General" } | Sort-Object Count -Descending) + @($areaStats | Where-Object { $_.Name -eq "General" })
+
+    $typeOrder = @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")
+
+    $notes = ""
+    foreach ($area in $areaOrder) {
+        $displayArea = $area.Name.Substring(0, 1).ToUpper() + $area.Name.Substring(1)
+        if ($notes) { $notes += [char]10 }
+        $notes += "### $displayArea`n`n"
+        foreach ($type in $typeOrder) {
+            if (-not $areas[$area.Name].ContainsKey($type)) { continue }
+            $title = $Types[$type].Title
+            $notes += "#### $title`n`n"
+            foreach ($commit in $areas[$area.Name][$type]) {
+                $notes += (Format-ReleaseBullet -Commit $commit) + [char]10
+            }
+            $notes += [char]10
+        }
+    }
+
+    $contributorMap = @{}
+    foreach ($c in $AllCommits) {
+        if (-not $c.AuthorUser) { continue }
+        if (-not $contributorMap.ContainsKey($c.AuthorUser)) { $contributorMap[$c.AuthorUser] = @() }
+        $contributorMap[$c.AuthorUser] += $c
+    }
+
+    $community = @()
+    foreach ($u in $contributorMap.Keys) {
+        if ($script:coreMaintainers -notcontains $u) { $community += $u }
+    }
+    $community = @($community | Sort-Object @{ Expression = { $contributorMap[$_].Count }; Descending = $true })
+
+    if ($community.Count -gt 0) {
+        if ($notes) { $notes += [char]10 }
+        $notes += "### Contributors`n`n"
+        $noun = if ($community.Count -eq 1) { "contributor" } else { "contributors" }
+        $notes += "Thank you to $($community.Count) community ${noun}:`n`n"
+        foreach ($u in $community) {
+            $notes += "@$u`n"
+            foreach ($c in @($contributorMap[$u] | Sort-Object Date)) {
+                $subject = $c.Type
+                if ($c.Scope) { $subject += "($($c.Scope))" }
+                $subject += ": $($c.Description)"
+                if ($c.Pr) { $subject += " (#$($c.Pr))" }
+                $notes += "- $subject`n"
+            }
+            $notes += [char]10
+        }
+    }
+
+    $allUsers = @($contributorMap.Keys | Sort-Object @{ Expression = { $contributorMap[$_].Count }; Descending = $true })
+    if ($allUsers.Count -gt 0) {
+        $mentions = @($allUsers | ForEach-Object { "@$_" })
+        $notes += "**Contributors:** " + ($mentions -join ", ") + [char]10
+    }
+
+    return $notes
+}
+
 function Invoke-Release {
     param([string[]]$ExtraArgs)
 
     $push = $false
+    $publishGh = $false
     $forceType = ""
     $versionOverride = ""
 
     for ($i = 0; $i -lt $ExtraArgs.Count; $i++) {
         switch -Regex ($ExtraArgs[$i]) {
             "^(--push|-Push)$" { $push = $true }
+            "^(--github|--gh|-Github)$" { $publishGh = $true }
             "^(--major|-Major)$" { $forceType = "major" }
             "^(--minor|-Minor)$" { $forceType = "minor" }
             "^(--patch|-Patch)$" { $forceType = "patch" }
@@ -1288,11 +1389,11 @@ function Invoke-Release {
     } catch { $lastTag = "" }
 
     if ($lastTag) {
-        $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad" --date=short
+        $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short
     } else {
         Write-Host ""
         Write-Host "  No tags found. Releasing from the beginning of history." -ForegroundColor Yellow
-        $log = git log --pretty=format:"%H|%s|%ad" --date=short
+        $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short
     }
 
     if (-not $log) {
@@ -1319,12 +1420,14 @@ function Invoke-Release {
 
     foreach ($line in ($log -split "`n")) {
         if (-not $line -or $line -eq "") { continue }
-        $parts = $line -split "\|", 3
-        if ($parts.Count -lt 3) { continue }
+        $parts = $line -split "\|", 5
+        if ($parts.Count -lt 5) { continue }
 
         $hash = $parts[0].Trim()
         $message = $parts[1].Trim()
         $date = $parts[2].Trim()
+        $authorName = $parts[3].Trim()
+        $authorEmail = $parts[4].Trim()
 
         $typeMatch = [regex]::Match($message, "(\w+)(?:\(([^)]+)\))?[!]?:\s*(.+)")
         if ($typeMatch.Success) {
@@ -1337,10 +1440,21 @@ function Invoke-Release {
                 $hasBreaking = $true
             }
 
+            $pr = ""
+            $prMatch = [regex]::Match($desc, "\(#(\d+)\)\s*$")
+            if ($prMatch.Success) {
+                $pr = $prMatch.Groups[1].Value
+                $desc = $desc.Substring(0, $prMatch.Index).TrimEnd()
+            }
+
             $commitObj = @{
                 Hash = $shortHash
                 Scope = $scope
                 Description = $desc
+                Type = $type
+                Date = $date
+                Pr = $pr
+                AuthorUser = (Get-GithubUsername -Name $authorName -Email $authorEmail)
             }
 
             if ($types.ContainsKey($type)) {
@@ -1392,21 +1506,8 @@ function Invoke-Release {
 
     $today = Get-Date -Format "yyyy-MM-dd"
 
-    $section = "## [$newVersion]($today)`n`n"
-    foreach ($type in @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")) {
-        $typeData = $types[$type]
-        if ($typeData.Commits.Count -gt 0) {
-            $section += "### $($typeData.Title)`n`n"
-            foreach ($commit in $typeData.Commits) {
-                if ($commit.Scope) {
-                    $section += "- **$($commit.Scope):** $($commit.Description) ($($commit.Hash))`n"
-                } else {
-                    $section += "- $($commit.Description) ($($commit.Hash))`n"
-                }
-            }
-            $section += "`n"
-        }
-    }
+    $notes = Build-ReleaseNotes -Types $types -AllCommits $allCommits
+    $section = "## [$newVersion]($today)`n`n$notes"
 
     $changelogFile = "CHANGELOG.md"
     $existingContent = ""
@@ -1459,7 +1560,7 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
     git add $changelogFile
 
     $tempFile = [System.IO.Path]::GetTempFileName()
-    [System.IO.File]::WriteAllText($tempFile, "chore(release): $tagName`n`n$section", [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($tempFile, "chore(release): $tagName`n`n$notes", [System.Text.UTF8Encoding]::new($false))
     git commit -F $tempFile
     Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
 
@@ -1468,8 +1569,9 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
         exit 1
     }
 
+    $headShort = git rev-parse --short HEAD
     $tempTag = [System.IO.Path]::GetTempFileName()
-    [System.IO.File]::WriteAllText($tempTag, $section, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($tempTag, "$headShort`n`n$notes", [System.Text.UTF8Encoding]::new($false))
     git tag -a $tagName -F $tempTag
     Remove-Item $tempTag -Force -ErrorAction SilentlyContinue
 
@@ -1500,6 +1602,32 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
             exit 1
         }
         Write-Host "  Pushed successfully!" -ForegroundColor Green
+    }
+
+    $ghAvailable = Get-Command gh -ErrorAction SilentlyContinue
+    if ($ghAvailable) {
+        if ($publishGh -or $push) {
+            $ghChoice = "y"
+        } else {
+            Write-Host ""
+            $ghChoice = Read-Host "  Publish GitHub Release? (y/n)"
+        }
+        if ($ghChoice -eq "y" -or $ghChoice -eq "Y") {
+            Write-Host ""
+            Write-Host "  Publishing GitHub Release $tagName..." -ForegroundColor Cyan
+            $tempNotes = [System.IO.Path]::GetTempFileName()
+            [System.IO.File]::WriteAllText($tempNotes, "$headShort`n`n$notes", [System.Text.UTF8Encoding]::new($false))
+            gh release create $tagName --title $tagName --notes-file $tempNotes
+            Remove-Item $tempNotes -Force -ErrorAction SilentlyContinue
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  GitHub Release failed." -ForegroundColor Red
+            } else {
+                Write-Host "  GitHub Release published!" -ForegroundColor Green
+            }
+        }
+    } elseif ($publishGh) {
+        Write-Host ""
+        Write-Host "  gh CLI not found. Install it to publish GitHub Releases." -ForegroundColor Yellow
     }
 }
 

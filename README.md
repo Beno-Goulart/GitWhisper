@@ -164,6 +164,7 @@ gitwhisper undo              # unified command
 | `.\gitwhisper.ps1 changelog -Limit 100` / `./gitwhisper.sh changelog --limit 100` | Limit to last 100 commits |
 | `.\gitwhisper.ps1 release` / `./gitwhisper.sh release` | Create release: bump version, update CHANGELOG.md, commit and tag |
 | `.\gitwhisper.ps1 release -Push` / `./gitwhisper.sh release --push` | Automatically push commit and tag after release |
+| `.\gitwhisper.ps1 release -Github` / `./gitwhisper.sh release --github` | Also publish a GitHub Release via the `gh` CLI |
 | `.\gitwhisper.ps1 release -Minor` / `./gitwhisper.sh release --minor` | Force a minor bump (`-Major` / `-Patch` also supported) |
 | `.\gitwhisper.ps1 release -Version 1.2.3` / `./gitwhisper.sh release --version 1.2.3` | Use an explicit version |
 
@@ -347,19 +348,39 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 
 ## [1.2.0] 2026-07-26
 
-### Features
+### Auth
 
-- **auth:** adds Login component (`a1b2c3d`)
-- **api:** adds user endpoint (`e4f5g6h`)
+#### Features
 
-### Bug Fixes
+- adds Login component (#42)
 
-- **auth:** fixes token refresh (`i7j8k9l`)
-- fixes typo in README (`m0n1o2p`)
+#### Bug Fixes
 
-### Performance
+- fixes token refresh (#40)
 
-- **api:** adds caching for user queries (`q3r4s5t`)
+### Api
+
+#### Features
+
+- adds user endpoint (#38)
+
+### General
+
+#### Documentation
+
+- updates README
+
+### Contributors
+
+Thank you to 2 community contributors:
+
+@johndoe
+- feat(auth): adds Login component (#42)
+
+@janedoe
+- fix(api): adds caching for user queries (#35)
+
+**Contributors:** @johndoe, @janedoe
 ```
 
 ### Version Bumping
@@ -380,6 +401,7 @@ Create a full release in one command: computes the next version from your commit
 # If installed globally
 gitwhisper release
 gitwhisper release --push        # also push commit + tag
+gitwhisper release --github      # also publish a GitHub Release via gh
 gitwhisper release --minor       # force a specific bump
 gitwhisper release --version 1.2.3
 gitwhisper release --dry-run     # preview without changing anything
@@ -387,6 +409,7 @@ gitwhisper release --dry-run     # preview without changing anything
 # If running directly
 .\gitwhisper.ps1 release
 .\gitwhisper.ps1 release -Push
+.\gitwhisper.ps1 release -Github
 .\gitwhisper.ps1 release -Minor
 .\gitwhisper.ps1 release -Version 1.2.3
 ```
@@ -395,10 +418,12 @@ gitwhisper release --dry-run     # preview without changing anything
 
 1. Detects the last tag (`git describe --tags --abbrev=0`); without tags it starts from `0.1.0`
 2. Reads the commits since that tag and computes the next version (see [Version Bumping](#version-bumping))
-3. Prepends a new `## [x.y.z](date)` section to `CHANGELOG.md`
-4. Commits `chore(release): vX.Y.Z`
-5. Creates an annotated tag `vX.Y.Z` with the changelog section as its message
-6. Optionally pushes the commit and the tag
+3. Prepends a new `## [x.y.z](date)` section to `CHANGELOG.md`, grouped by **scope** (each scope becomes an area like `Core`, `Desktop`; unscoped commits go to `General`) with sub-sections per type (`Features`, `Bug Fixes`, ...)
+4. Links pull-request numbers `(#123)` and adds a **Contributors** section with per-author commit lists
+5. Commits `chore(release): vX.Y.Z`
+6. Creates an annotated tag `vX.Y.Z` with the release notes as its message
+7. Optionally pushes the commit and the tag
+8. If the `gh` CLI is installed, offers to publish a real **GitHub Release** with the same notes (`--github` skips the prompt)
 
 > **Tip:** run `gitwhisper release --dry-run` first to preview the version and changelog before publishing.
 
@@ -407,6 +432,7 @@ gitwhisper release --dry-run     # preview without changing anything
 | Flag (PS) | Flag (Bash) | Description |
 |---|---|---|
 | `-Push` | `--push` | Skip the push prompt and push commit + tag |
+| `-Github` | `--github` | Also publish a GitHub Release (requires the `gh` CLI) |
 | `-Major` | `--major` | Force a major bump |
 | `-Minor` | `--minor` | Force a minor bump |
 | `-Patch` | `--patch` | Force a patch bump |
@@ -453,6 +479,22 @@ gitwhisper.ps1 / gitwhisper.sh
 ```
 
 ## Configuration
+
+### Core Maintainers
+
+Users listed here are excluded from the "community contributors" section of release notes:
+
+```powershell
+# gitwhisper.ps1 — near the top of the script
+$coreMaintainers = @("yourusername", "yourteam")
+```
+
+```bash
+# gitwhisper.sh — near the top of the script
+CORE_MAINTAINERS=("yourusername" "yourteam")
+```
+
+GitHub usernames are inferred from the commit author's `@users.noreply.github.com` email or the author name.
 
 ### Custom Gitmoji
 

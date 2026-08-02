@@ -14,6 +14,7 @@ show_help() {
     echo "    gitwhisper changelog     - generate changelog"
     echo "    gitwhisper release       - create release (changelog + tag)"
     echo "    gitwhisper release --push   - push commit and tag after release"
+    echo "    gitwhisper release --github - also publish a GitHub Release (gh CLI)"
     echo "    gitwhisper release --minor  - force minor bump (major/minor/patch)"
     echo "    gitwhisper release --version 1.2.3 - use explicit version"
     echo "    gitwhisper help          - show this help"
@@ -736,6 +737,154 @@ invoke_commit() {
     fi
 }
 
+# GitHub usernames that belong to the project maintainers.
+# They are excluded from the "community contributors" section.
+CORE_MAINTAINERS=()
+
+declare -A TYPE_TITLES
+TYPE_TITLES[feat]="Features"
+TYPE_TITLES[fix]="Bug Fixes"
+TYPE_TITLES[perf]="Performance"
+TYPE_TITLES[refactor]="Refactoring"
+TYPE_TITLES[docs]="Documentation"
+TYPE_TITLES[test]="Tests"
+TYPE_TITLES[build]="Build"
+TYPE_TITLES[ci]="CI/CD"
+TYPE_TITLES[chore]="Chores"
+TYPE_TITLES[style]="Style"
+TYPE_TITLES[revert]="Reverts"
+
+TYPE_ORDER=(feat fix perf refactor docs test build ci chore style revert)
+
+declare -A RELEASE_AREAS=()
+declare -A RELEASE_ENTRIES=()
+declare -A RELEASE_AUTHORS=()
+declare -A RELEASE_AUTHOR_ENTRIES=()
+
+get_github_user() {
+    local name="$1" email="$2"
+    local u
+    u=$(echo "$email" | grep -oE '^[^@+]+' | head -1)
+    if [[ "$email" == *"@users.noreply.github.com"* && "$u" =~ ^[a-zA-Z0-9-]+$ ]]; then
+        echo "$u"
+        return
+    fi
+    if [[ "$name" =~ ^@([a-zA-Z0-9-]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return
+    fi
+    if [[ "$name" =~ ^[a-zA-Z0-9-]+$ ]]; then
+        echo "$name"
+        return
+    fi
+    echo ""
+}
+
+release_add_commit() {
+    local type="$1" scope="$2" desc="$3" pr="$4" author="$5"
+    local area="${scope:-General}"
+    local entry="- ${desc}"
+    [[ -n "$pr" ]] && entry+=" (#${pr})"
+    local key="${area}|${type}"
+    if [[ -z "${RELEASE_ENTRIES[$key]}" ]]; then
+        RELEASE_ENTRIES[$key]="$entry"
+    else
+        RELEASE_ENTRIES[$key]+=$'\n'"$entry"
+    fi
+    RELEASE_AREAS[$area]=$(( ${RELEASE_AREAS[$area]:-0} + 1 ))
+    if [[ -n "$author" ]]; then
+        local subject="$type"
+        [[ -n "$scope" ]] && subject+="($scope)"
+        subject+=": $desc"
+        [[ -n "$pr" ]] && subject+=" (#$pr)"
+        if [[ -z "${RELEASE_AUTHOR_ENTRIES[$author]}" ]]; then
+            RELEASE_AUTHOR_ENTRIES[$author]="$subject"
+        else
+            RELEASE_AUTHOR_ENTRIES[$author]="$subject"$'\n'"${RELEASE_AUTHOR_ENTRIES[$author]}"
+        fi
+        RELEASE_AUTHORS[$author]=$(( ${RELEASE_AUTHORS[$author]:-0} + 1 ))
+    fi
+}
+
+build_release_notes() {
+    local notes=""
+    local area key type a b i inserted
+    local -a areas=() sorted=()
+
+    for area in "${!RELEASE_AREAS[@]}"; do
+        [[ "$area" == "General" ]] && continue
+        areas+=("$area")
+    done
+
+    for a in "${areas[@]}"; do
+        inserted=false
+        for i in "${!sorted[@]}"; do
+            b="${sorted[$i]}"
+            if (( ${RELEASE_AREAS[$b]} < ${RELEASE_AREAS[$a]} )); then
+                sorted=("${sorted[@]:0:$i}" "$a" "${sorted[@]:$i}")
+                inserted=true
+                break
+            fi
+        done
+        [[ "$inserted" == false ]] && sorted+=("$a")
+    done
+    [[ -n "${RELEASE_AREAS[General]}" ]] && sorted+=("General")
+
+    for area in "${sorted[@]}"; do
+        [[ -n "$notes" ]] && notes+=$'\n'
+        notes+="### ${area^}"$'\n'$'\n'
+        for type in "${TYPE_ORDER[@]}"; do
+            key="$area|$type"
+            if [[ -n "${RELEASE_ENTRIES[$key]}" ]]; then
+                notes+="#### ${TYPE_TITLES[$type]}"$'\n'$'\n'
+                notes+="${RELEASE_ENTRIES[$key]}"$'\n'$'\n'
+            fi
+        done
+    done
+
+    local u u2 i2 inserted2
+    local -a community=() csorted=()
+    for u in "${!RELEASE_AUTHORS[@]}"; do
+        [[ " ${CORE_MAINTAINERS[*]} " == *" $u "* ]] && continue
+        community+=("$u")
+    done
+
+    for u in "${community[@]}"; do
+        inserted2=false
+        for i2 in "${!csorted[@]}"; do
+            u2="${csorted[$i2]}"
+            if (( ${RELEASE_AUTHORS[$u2]} < ${RELEASE_AUTHORS[$u]} )); then
+                csorted=("${csorted[@]:0:$i2}" "$u" "${csorted[@]:$i2}")
+                inserted2=true
+                break
+            fi
+        done
+        [[ "$inserted2" == false ]] && csorted+=("$u")
+    done
+
+    if [[ ${#csorted[@]} -gt 0 ]]; then
+        [[ -n "$notes" ]] && notes+=$'\n'
+        notes+="### Contributors"$'\n'$'\n'
+        local noun="contributors"
+        [[ ${#csorted[@]} -eq 1 ]] && noun="contributor"
+        notes+="Thank you to ${#csorted[@]} community $noun:"$'\n'$'\n'
+        for u in "${csorted[@]}"; do
+            notes+="@$u"$'\n'
+            notes+="${RELEASE_AUTHOR_ENTRIES[$u]}"$'\n'$'\n'
+        done
+    fi
+
+    if [[ ${#RELEASE_AUTHORS[@]} -gt 0 ]]; then
+        local -a mentions=()
+        for u in "${!RELEASE_AUTHORS[@]}"; do
+            mentions+=("@$u")
+        done
+        notes+="**Contributors:** ${mentions[*]}"$'\n'
+    fi
+
+    printf '%s' "$notes"
+}
+
 invoke_changelog() {
     SINCE_TAG=false
     LIMIT=50
@@ -751,13 +900,13 @@ invoke_changelog() {
     if [[ "$SINCE_TAG" == true ]]; then
         LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
         if [[ $? -eq 0 && -n "$LAST_TAG" ]]; then
-            LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad" --date=short)
+            LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short)
         else
             echo -e "\033[33mNo tags found. Showing all commits.\033[0m"
-            LOG=$(git log --pretty=format:"%H|%s|%ad" --date=short -n "$LIMIT")
+            LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n "$LIMIT")
         fi
     else
-        LOG=$(git log --pretty=format:"%H|%s|%ad" --date=short -n "$LIMIT")
+        LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n "$LIMIT")
     fi
 
     if [[ -z "$LOG" ]]; then
@@ -765,8 +914,10 @@ invoke_changelog() {
         exit 0
     fi
 
-    declare -a FEAT=() FIX=() PERF=() REFACTOR=() DOCS=() TEST=()
-    declare -a BUILD=() CI=() CHORE=() STYLE=() REVERT=() OTHER=()
+    RELEASE_AREAS=()
+    RELEASE_ENTRIES=()
+    RELEASE_AUTHORS=()
+    RELEASE_AUTHOR_ENTRIES=()
 
     TOTAL=0
 
@@ -776,6 +927,8 @@ invoke_changelog() {
         HASH=$(echo "$line" | cut -d'|' -f1)
         MESSAGE=$(echo "$line" | cut -d'|' -f2)
         DATE=$(echo "$line" | cut -d'|' -f3)
+        AUTHOR_NAME=$(echo "$line" | cut -d'|' -f4)
+        AUTHOR_EMAIL=$(echo "$line" | cut -d'|' -f5)
 
         SHORT_HASH="${HASH:0:7}"
 
@@ -783,29 +936,17 @@ invoke_changelog() {
         if [[ -z "$TYPE" ]]; then
             TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+:' | head -1 | tr -d ':')
         fi
-        SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | tr -d '()')
+        SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | head -1 | tr -d '()')
         DESC=$(echo "$MESSAGE" | sed 's/.*:[[:space:]]*//')
 
-        COMMIT_ENTRY="- "
-        if [[ -n "$SCOPE" ]]; then
-            COMMIT_ENTRY+="**${SCOPE}:** "
+        PR=""
+        if [[ "$DESC" =~ \(#([0-9]+)\)[[:space:]]*$ ]]; then
+            PR="${BASH_REMATCH[1]}"
+            DESC=$(echo "$DESC" | sed -E 's/[[:space:]]*\(#[0-9]+\)[[:space:]]*$//')
         fi
-        COMMIT_ENTRY+="${DESC} (\`${SHORT_HASH}\`)"
 
-        case "$TYPE" in
-            feat)     FEAT+=("$COMMIT_ENTRY") ;;
-            fix)      FIX+=("$COMMIT_ENTRY") ;;
-            perf)     PERF+=("$COMMIT_ENTRY") ;;
-            refactor) REFACTOR+=("$COMMIT_ENTRY") ;;
-            docs)     DOCS+=("$COMMIT_ENTRY") ;;
-            test)     TEST+=("$COMMIT_ENTRY") ;;
-            build)    BUILD+=("$COMMIT_ENTRY") ;;
-            ci)       CI+=("$COMMIT_ENTRY") ;;
-            chore)    CHORE+=("$COMMIT_ENTRY") ;;
-            style)    STYLE+=("$COMMIT_ENTRY") ;;
-            revert)   REVERT+=("$COMMIT_ENTRY") ;;
-            *)        OTHER+=("$COMMIT_ENTRY") ;;
-        esac
+        AUTHOR_USER=$(get_github_user "$AUTHOR_NAME" "$AUTHOR_EMAIL")
+        release_add_commit "$TYPE" "$SCOPE" "$DESC" "$PR" "$AUTHOR_USER"
 
         TOTAL=$((TOTAL + 1))
     done <<< "$LOG"
@@ -822,8 +963,8 @@ invoke_changelog() {
         CURRENT_VERSION="0.1.0"
     fi
 
-    HAS_FEAT=$((${#FEAT[@]}))
-    HAS_FIX=$((${#FIX[@]}))
+    HAS_FEAT=$(echo "$LOG" | grep -cE '\|feat[(:]' || true)
+    HAS_FIX=$(echo "$LOG" | grep -cE '\|fix[(:]' || true)
     HAS_BREAKING=$(echo "$LOG" | grep -c '!' || true)
 
     IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
@@ -840,6 +981,8 @@ invoke_changelog() {
 
     TODAY=$(date +%Y-%m-%d)
 
+    NOTES=$(build_release_notes)
+
     {
     echo "# Changelog"
     echo ""
@@ -849,34 +992,7 @@ invoke_changelog() {
     echo ""
     echo "## [$NEW_VERSION]($TODAY)"
     echo ""
-
-    write_section() {
-        local title="$1"
-        shift
-        local arr=("$@")
-        if [[ ${#arr[@]} -gt 0 ]]; then
-            echo "### $title"
-            echo ""
-            for entry in "${arr[@]}"; do
-                echo "$entry"
-            done
-            echo ""
-        fi
-    }
-
-    write_section "Features" "${FEAT[@]}"
-    write_section "Bug Fixes" "${FIX[@]}"
-    write_section "Performance" "${PERF[@]}"
-    write_section "Refactoring" "${REFACTOR[@]}"
-    write_section "Documentation" "${DOCS[@]}"
-    write_section "Tests" "${TEST[@]}"
-    write_section "Build" "${BUILD[@]}"
-    write_section "CI/CD" "${CI[@]}"
-    write_section "Chores" "${CHORE[@]}"
-    write_section "Style" "${STYLE[@]}"
-    write_section "Reverts" "${REVERT[@]}"
-    write_section "Other" "${OTHER[@]}"
-
+    echo "$NOTES"
     } > CHANGELOG.md
 
     echo -e "\033[32m=== Changelog generated ===\033[0m"
@@ -951,7 +1067,7 @@ invoke_pr() {
         if [[ -z "$TYPE" ]]; then
             TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+:' | head -1 | tr -d ':')
         fi
-        SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | tr -d '()')
+        SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | head -1 | tr -d '()')
         DESC=$(echo "$MESSAGE" | sed 's/.*:[[:space:]]*//')
 
         ENTRY="- "
@@ -1095,12 +1211,14 @@ invoke_pr() {
 
 invoke_release() {
     local push=false
+    local github_flag=false
     local force_type=""
     local version_override=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
             --push) push=true; shift ;;
+            --github|-Github) github_flag=true; shift ;;
             --major) force_type="major"; shift ;;
             --minor) force_type="minor"; shift ;;
             --patch) force_type="patch"; shift ;;
@@ -1127,11 +1245,11 @@ invoke_release() {
     fi
 
     if [[ -n "$LAST_TAG" ]]; then
-        LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad" --date=short)
+        LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short)
     else
         echo ""
         echo -e "  \033[33mNo tags found. Releasing from the beginning of history.\033[0m"
-        LOG=$(git log --pretty=format:"%H|%s|%ad" --date=short)
+        LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short)
     fi
 
     if [[ -z "$LOG" ]]; then
@@ -1139,8 +1257,10 @@ invoke_release() {
         exit 0
     fi
 
-    declare -a FEAT=() FIX=() PERF=() REFACTOR=() DOCS=() TEST=()
-    declare -a BUILD=() CI=() CHORE=() STYLE=() REVERT=() OTHER=()
+    RELEASE_AREAS=()
+    RELEASE_ENTRIES=()
+    RELEASE_AUTHORS=()
+    RELEASE_AUTHOR_ENTRIES=()
     HAS_BREAKING=false
     TOTAL=0
 
@@ -1148,39 +1268,30 @@ invoke_release() {
         [[ -z "$line" ]] && continue
         HASH=$(echo "$line" | cut -d'|' -f1)
         MESSAGE=$(echo "$line" | cut -d'|' -f2)
+        DATE=$(echo "$line" | cut -d'|' -f3)
+        AUTHOR_NAME=$(echo "$line" | cut -d'|' -f4)
+        AUTHOR_EMAIL=$(echo "$line" | cut -d'|' -f5)
         SHORT_HASH="${HASH:0:7}"
 
         TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+\(' | head -1 | tr -d '(')
         if [[ -z "$TYPE" ]]; then
             TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+:' | head -1 | tr -d ':')
         fi
-        SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | tr -d '()')
+        SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | head -1 | tr -d '()')
         DESC=$(echo "$MESSAGE" | sed 's/.*:[[:space:]]*//')
 
-        COMMIT_ENTRY="- "
-        if [[ -n "$SCOPE" ]]; then
-            COMMIT_ENTRY+="**${SCOPE}:** "
+        PR=""
+        if [[ "$DESC" =~ \(#([0-9]+)\)[[:space:]]*$ ]]; then
+            PR="${BASH_REMATCH[1]}"
+            DESC=$(echo "$DESC" | sed -E 's/[[:space:]]*\(#[0-9]+\)[[:space:]]*$//')
         fi
-        COMMIT_ENTRY+="${DESC} (\`${SHORT_HASH}\`)"
 
         if [[ "$MESSAGE" == *"!"* || "$MESSAGE" == *"BREAKING CHANGE"* ]]; then
             HAS_BREAKING=true
         fi
 
-        case "$TYPE" in
-            feat)     FEAT+=("$COMMIT_ENTRY") ;;
-            fix)      FIX+=("$COMMIT_ENTRY") ;;
-            perf)     PERF+=("$COMMIT_ENTRY") ;;
-            refactor) REFACTOR+=("$COMMIT_ENTRY") ;;
-            docs)     DOCS+=("$COMMIT_ENTRY") ;;
-            test)     TEST+=("$COMMIT_ENTRY") ;;
-            build)    BUILD+=("$COMMIT_ENTRY") ;;
-            ci)       CI+=("$COMMIT_ENTRY") ;;
-            chore)    CHORE+=("$COMMIT_ENTRY") ;;
-            style)    STYLE+=("$COMMIT_ENTRY") ;;
-            revert)   REVERT+=("$COMMIT_ENTRY") ;;
-            *)        OTHER+=("$COMMIT_ENTRY") ;;
-        esac
+        AUTHOR_USER=$(get_github_user "$AUTHOR_NAME" "$AUTHOR_EMAIL")
+        release_add_commit "$TYPE" "$SCOPE" "$DESC" "$PR" "$AUTHOR_USER"
 
         TOTAL=$((TOTAL + 1))
     done <<< "$LOG"
@@ -1208,7 +1319,7 @@ invoke_release() {
         NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
     elif [[ "$HAS_BREAKING" == true ]]; then
         NEW_VERSION="$((MAJOR + 1)).0.0"
-    elif [[ ${#FEAT[@]} -gt 0 ]]; then
+    elif echo "$LOG" | grep -qE '\|feat[(:]'; then
         NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
     else
         NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
@@ -1223,34 +1334,11 @@ invoke_release() {
 
     TODAY=$(date +%Y-%m-%d)
 
+    NOTES=$(build_release_notes)
+
     SECTION="## [$NEW_VERSION]($TODAY)"
     SECTION+=$'\n'$'\n'
-
-    append_release_section() {
-        local title="$1"
-        shift
-        local arr=("$@")
-        if [[ ${#arr[@]} -gt 0 ]]; then
-            SECTION+="### $title"$'\n'$'\n'
-            for entry in "${arr[@]}"; do
-                SECTION+="$entry"$'\n'
-            done
-            SECTION+=$'\n'
-        fi
-    }
-
-    append_release_section "Features" "${FEAT[@]}"
-    append_release_section "Bug Fixes" "${FIX[@]}"
-    append_release_section "Performance" "${PERF[@]}"
-    append_release_section "Refactoring" "${REFACTOR[@]}"
-    append_release_section "Documentation" "${DOCS[@]}"
-    append_release_section "Tests" "${TEST[@]}"
-    append_release_section "Build" "${BUILD[@]}"
-    append_release_section "CI/CD" "${CI[@]}"
-    append_release_section "Chores" "${CHORE[@]}"
-    append_release_section "Style" "${STYLE[@]}"
-    append_release_section "Reverts" "${REVERT[@]}"
-    append_release_section "Other" "${OTHER[@]}"
+    SECTION+="$NOTES"
 
     CHANGELOG_FILE="CHANGELOG.md"
     TMP_CONTENT=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-release.txt")
@@ -1310,13 +1398,15 @@ invoke_release() {
     git add "$CHANGELOG_FILE"
 
     COMMIT_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-commit.txt")
-    printf 'chore(release): %s\n\n%s\n' "$TAG_NAME" "$SECTION" > "$COMMIT_FILE"
+    printf 'chore(release): %s\n\n%s\n' "$TAG_NAME" "$NOTES" > "$COMMIT_FILE"
     git commit -F "$COMMIT_FILE" >/dev/null || { rm -f "$COMMIT_FILE"; echo -e "  \033[31mRelease commit failed.\033[0m"; exit 1; }
     rm -f "$COMMIT_FILE"
 
+    HEAD_SHORT=$(git rev-parse --short HEAD)
+
     echo -e "  \033[36mCreating tag $TAG_NAME...\033[0m"
     TAG_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-tag.txt")
-    printf '%s\n' "$SECTION" > "$TAG_FILE"
+    printf '%s\n\n%s\n' "$HEAD_SHORT" "$NOTES" > "$TAG_FILE"
     git tag -a "$TAG_NAME" -F "$TAG_FILE" || { rm -f "$TAG_FILE"; echo -e "  \033[31mTag creation failed.\033[0m"; exit 1; }
     rm -f "$TAG_FILE"
 
@@ -1334,6 +1424,27 @@ invoke_release() {
         git push >/dev/null || { echo -e "  \033[31mPush failed.\033[0m"; exit 1; }
         git push origin "$TAG_NAME" >/dev/null || { echo -e "  \033[31mTag push failed.\033[0m"; exit 1; }
         echo -e "  \033[32mPushed successfully!\033[0m"
+    fi
+
+    if command -v gh >/dev/null 2>&1; then
+        if [[ "$github_flag" == true || "$push" == true ]]; then
+            GH_CHOICE="y"
+        else
+            echo ""
+            read -p "  Publish GitHub Release? (y/n): " GH_CHOICE
+        fi
+        if [[ "$GH_CHOICE" == "y" || "$GH_CHOICE" == "Y" ]]; then
+            echo ""
+            echo -e "  \033[36mPublishing GitHub Release $TAG_NAME...\033[0m"
+            NOTES_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-notes.txt")
+            printf '%s\n\n%s\n' "$HEAD_SHORT" "$NOTES" > "$NOTES_FILE"
+            gh release create "$TAG_NAME" --title "$TAG_NAME" --notes-file "$NOTES_FILE" \
+                || echo -e "  \033[31mGitHub Release failed.\033[0m"
+            rm -f "$NOTES_FILE"
+        fi
+    elif [[ "$github_flag" == true ]]; then
+        echo ""
+        echo -e "  \033[33mgh CLI not found. Install it to publish GitHub Releases.\033[0m"
     fi
 }
 
