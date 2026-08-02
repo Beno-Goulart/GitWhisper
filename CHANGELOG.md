@@ -3,6 +3,52 @@
 All notable changes to this project will be documented in this file.
 
 Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+## [0.2.2](2026-08-02)
+
+### Tests
+
+#### Refactoring
+
+- adds -Path, ProfilePath, n, Msg, Description, Title, Prompt parameter and adds Test-Installed, Ensure-Profile, Remove-ProfileBlock function
+- adds Get-BranchType function and adds get_branch_type, test_suggest_branch_type function
+- adds git log
+- adds pass, fail, check_exit function and adds git log, add, commit
+
+
+### Desktop
+
+#### Refactoring
+
+- adds gitwhisper function and adds scriptPaths, installHome, gitwhisper function
+
+
+### General
+
+#### Refactoring
+
+- updates scripts (gitwhisper, run_tests) and ci
+- updates 2 files
+- adds -Content parameter and adds Remove-LiteralStrings function
+- adds git diff, pull, log
+
+
+### Contributors
+
+Thank you to 1 community contributor:
+
+@Beno-Goulart
+- refactor: updates 2 files
+- refactor(tests): adds pass, fail, check_exit function and adds git log, add, commit
+- refactor: adds git diff, pull, log
+- refactor: adds -Content parameter and adds Remove-LiteralStrings function
+- refactor: updates scripts (gitwhisper, run_tests) and ci
+- refactor(tests): adds -Path, ProfilePath, n, Msg, Description, Title, Prompt parameter and adds Test-Installed, Ensure-Profile, Remove-ProfileBlock function
+- refactor(desktop): adds gitwhisper function and adds scriptPaths, installHome, gitwhisper function
+- refactor(tests): adds git log
+- refactor(tests): adds Get-BranchType function and adds get_branch_type, test_suggest_branch_type function
+
+**Contributors:** @Beno-Goulart
+
 ## [0.3.0](2026-08-02)
 
 ### Auth
@@ -135,4 +181,5 @@ Thank you to 2 community contributors:
 - feat(auth): adds amend, PR generation, and auto-detection improvements
 
 **Contributors:** @Beno-Goulart, @135740382
+
 
