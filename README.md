@@ -18,8 +18,9 @@
   <a href="#features">Features</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#commands">Commands</a> ·
-  <a href="#architecture">Architecture</a> ·
-  <a href="#tech-stack">Tech Stack</a>
+  <a href="#changelog-generator">Changelog</a> ·
+  <a href="#automated-release">Release</a> ·
+  <a href="#configuration">Configuration</a>
 </p>
 
 ---
@@ -62,8 +63,9 @@ PS C:\MyProject> gitwhisper
 | Scope Inference | Reads folder structure to determine scope (auth, api, ui, etc.) |
 | Specific Descriptions | Analyzes diff content for imports, functions, classes, hooks, routes |
 | Gitmoji Support | Generates both emoji and non-emoji versions |
-| Automated Release | Bumps version, updates CHANGELOG.md, and creates a `vX.Y.Z` tag |
-| Undo Commit | Soft or mixed reset of the last commit via `-Undo` flag |
+| Automated Release | Bumps version, updates CHANGELOG.md, creates a `vX.Y.Z` tag, and optionally publishes a GitHub Release |
+| Polished Release Notes | Groups commits by scope, links PRs `(#123)`, and thanks contributors by username |
+| Undo Commit | Soft or mixed reset of the last commit via `gitwhisper undo` |
 | Staged Only | Only analyzes what's staged (what will be committed) |
 | PS 5.1 Compatible | Unicode escapes for full Windows PowerShell compatibility |
 | Cross-Platform | PowerShell for Windows, Bash for Linux/macOS |
@@ -393,7 +395,7 @@ Thank you to 2 community contributors:
 
 ## Automated Release
 
-Create a full release in one command: computes the next version from your commit history, prepends the new section to `CHANGELOG.md`, commits it, and creates an annotated `vX.Y.Z` tag.
+Create a full release in one command: computes the next version from your commit history, prepends the new section to `CHANGELOG.md`, commits it, creates an annotated `vX.Y.Z` tag, and — if you want — publishes a polished **GitHub Release** with the same notes.
 
 ### Usage
 
@@ -459,6 +461,8 @@ GitWhisper/
 ├── gitwhisper.sh           # Unified script (Linux/macOS Bash)
 ├── install.ps1             # Global install for PowerShell
 ├── install.sh              # Global install for Bash/Zsh
+├── CHANGELOG.md            # Auto-generated changelog
+├── LICENSE                 # MIT license
 ├── logo.png                # Project logo
 └── README.md               # This file
 ```
@@ -475,7 +479,11 @@ gitwhisper.ps1 / gitwhisper.sh
 │   └── Output              # With/without emoji versions
 ├── invoke_undo             # Undo last commit (soft/mixed reset)
 ├── invoke_changelog        # CHANGELOG.md generator
-└── invoke_release          # Automated release (version + changelog + tag)
+├── invoke_release          # Automated release (version + changelog + tag)
+│   ├── Build-ReleaseNotes  # Groups by scope, links PRs, lists contributors
+│   ├── Get-GithubUsername  # Infers GitHub usernames from author info
+│   └── gh release create   # Publishes a GitHub Release (--github)
+└── invoke_pr               # PR description generator
 ```
 
 ## Configuration
