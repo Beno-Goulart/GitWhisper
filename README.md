@@ -62,6 +62,7 @@ PS C:\MyProject> gitwhisper
 | Type Detection | Auto-detects feat, fix, docs, style, refactor, perf, test, build, ci, chore |
 | Scope Inference | Reads folder structure to determine scope (auth, api, ui, etc.) |
 | Specific Descriptions | Analyzes diff content for imports, functions, classes, hooks, routes |
+| Self-Noise Filter | Ignores literal strings from GitWhisper's own files (`gitwhisper.*`) when analyzing the diff, so script edits produce clean messages |
 | Gitmoji Support | Generates both emoji and non-emoji versions |
 | Automated Release | Bumps version, updates CHANGELOG.md, creates a `vX.Y.Z` tag, and optionally publishes a GitHub Release |
 | Polished Release Notes | Groups commits by scope, links PRs `(#123)`, and thanks contributors by username |
@@ -283,6 +284,8 @@ The script analyzes the **actual diff content** to generate precise descriptions
 | `margin: 10px` | `adjusts CSS properties` |
 | `fetch("/api")` | `adds API call` |
 | `npm install axios` | `updates axios dependency` |
+
+> **Self-Noise Filter:** when the diff is from GitWhisper's own files (`gitwhisper.ps1`, `gitwhisper.sh`, `install.ps1`, `install.sh`), literal strings are stripped before analysis. This keeps script edits clean — e.g. `Write-Host "Unstaged changes detected."` and `"Body: $bl"` no longer leak into the commit message, while real code (functions, git commands, params) is still detected.
 
 ## Examples
 

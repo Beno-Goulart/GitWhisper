@@ -164,6 +164,10 @@ edit_message_body() {
     printf '%s\n' "${edited_body[@]}"
 }
 
+remove_literal_strings() {
+    perl -pe $'s/"[^"]*"/""/g; s/\x27[^\x27]*\x27/\x27\x27/g' <<< "$1"
+}
+
 invoke_commit() {
     UNSTAGED=$(git diff --name-only)
     UNTRACKED=$(git ls-files --others --exclude-standard)
@@ -219,6 +223,14 @@ invoke_commit() {
         ALL_CHANGED_LOWER+=("$(echo "$f" | tr '[:upper:]' '[:lower:]')")
     done
 
+    SELF_SCRIPT=false
+    for f in "${ALL_CHANGED_LOWER[@]}"; do
+        if [[ "$f" =~ gitwhisper|^install\.(ps1|sh)$ ]]; then
+            SELF_SCRIPT=true
+            break
+        fi
+    done
+
     contains_pattern() {
         local arr=("$@")
         local pattern="${arr[-1]}"
@@ -238,7 +250,7 @@ invoke_commit() {
         local count=0
         for item in "${arr[@]}"; do
             if [[ "$item" =~ $pattern ]]; then
-                ((count++))
+                ((count+=1))
             fi
         done
         echo "$count"
@@ -335,6 +347,11 @@ invoke_commit() {
     ADDED_LINES=$(echo "$DIFF_CONTENT" | grep -E '^\+[^+]' || true)
     REMOVED_LINES=$(echo "$DIFF_CONTENT" | grep -E '^-[^-]' || true)
 
+    if [[ "$SELF_SCRIPT" == true ]]; then
+        ADDED_LINES=$(remove_literal_strings "$ADDED_LINES")
+        REMOVED_LINES=$(remove_literal_strings "$REMOVED_LINES")
+    fi
+
     TEST_COUNT=0
     NON_TEST_COUNT=0
     CONFIG_COUNT=0
@@ -344,12 +361,12 @@ invoke_commit() {
     DB_COUNT=0
 
     for f in "${ALL_CHANGED_LOWER[@]}"; do
-        is_test_file "$f" && ((TEST_COUNT++)) || ((NON_TEST_COUNT++))
-        is_config_file "$f" && ((CONFIG_COUNT++))
-        is_ci_file "$f" && ((CI_COUNT++))
-        is_doc_file "$f" && ((DOC_COUNT++))
-        is_style_file "$f" && ((STYLE_COUNT++))
-        is_db_file "$f" && ((DB_COUNT++))
+        is_test_file "$f" && ((TEST_COUNT+=1)) || ((NON_TEST_COUNT+=1))
+        is_config_file "$f" && ((CONFIG_COUNT+=1))
+        is_ci_file "$f" && ((CI_COUNT+=1))
+        is_doc_file "$f" && ((DOC_COUNT+=1))
+        is_style_file "$f" && ((STYLE_COUNT+=1))
+        is_db_file "$f" && ((DB_COUNT+=1))
     done
 
     HAS_PERF=false

@@ -248,17 +248,24 @@ function Invoke-Commit {
     $addedLower = $allFiles | ForEach-Object { $_.ToLower() }
     $deletedLower = $deleted | ForEach-Object { $_.ToLower() }
 
+    $selfScript = $allFiles | Where-Object { $_ -match "gitwhisper|^install\.(ps1|sh)$" }
+
     $scope = Get-Scope -Files $allFiles
     if (-not $scope) {
         $scope = Get-BranchScope
     }
-    $result = Get-CommitType -Added $added -Modified $modified -Deleted $deleted -AddedLower $addedLower -ModifiedLower ($modified | ForEach-Object { $_.ToLower() }) -DeletedLower $deletedLower -DiffContent $diffContent
+    $result = Get-CommitType -Added $added -Modified $modified -Deleted $deleted -AddedLower $addedLower -ModifiedLower ($modified | ForEach-Object { $_.ToLower() }) -DeletedLower $deletedLower -DiffContent $diffContent -SelfScript:($selfScript.Count -gt 0)
 
     $type = $result.Type
     $desc = $result.Desc
 
     $addedLines = ($diffContent -split "`n" | Where-Object { $_ -match "^\+[^+]" }) -join "`n"
     $removedLines = ($diffContent -split "`n" | Where-Object { $_ -match "^-[^-]" }) -join "`n"
+
+    if ($selfScript.Count -gt 0) {
+        $addedLines   = Remove-LiteralStrings -Content $addedLines
+        $removedLines = Remove-LiteralStrings -Content $removedLines
+    }
 
     $detailParts = @()
 
@@ -540,6 +547,14 @@ function Invoke-Commit {
     }
 }
 
+function Remove-LiteralStrings {
+    param([string]$Content)
+    if (-not $Content) { return "" }
+    $Content = [regex]::Replace($Content, '"(?:[^"\\]|\\.)*"', '""')
+    $Content = [regex]::Replace($Content, "'(?:[^'\\]|\\.)*'", "''")
+    return $Content
+}
+
 function Get-Scope {
     param([string[]]$Files)
 
@@ -605,8 +620,13 @@ function Get-CommitType {
         [string[]]$AddedLower,
         [string[]]$ModifiedLower,
         [string[]]$DeletedLower,
-        [string]$DiffContent
+        [string]$DiffContent,
+        [switch]$SelfScript
     )
+
+    if ($SelfScript) {
+        $DiffContent = Remove-LiteralStrings -Content $DiffContent
+    }
 
     $allModified = $AddedLower + $ModifiedLower
     $allChanged  = $AddedLower + $ModifiedLower + $DeletedLower
