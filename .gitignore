@@ -1,0 +1,4 @@
+# Node / Electron desktop app
+desktop/node_modules/
+desktop/dist/
+desktop/*.log

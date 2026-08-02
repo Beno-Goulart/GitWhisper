@@ -96,6 +96,23 @@ powershell -ExecutionPolicy Bypass -File .\install-gui.ps1
 
 The GUI installer has two visualizer tabs: **Profile preview** (shows exactly what will be added to or removed from your profile and bin directory before you apply it) and **GitWhisper preview** (type conventions + a live message generator that runs `gitwhisper suggest` against a temporary repository).
 
+**Windows — desktop app (Electron):**
+
+```powershell
+cd desktop
+npm install
+npm start        # run the app from source
+npm run dist     # build a portable .exe → desktop\dist\GitWhisper-Installer-0.3.0.exe
+```
+
+Or just run the pre-built portable exe — no install required:
+
+```
+desktop\dist\GitWhisper-Installer-0.3.0.exe
+```
+
+The desktop app mirrors the WPF installer: pick a profile and integration type, see a live preview of the block that will be appended, install/uninstall, and set up a git project (hooks + `.gitwhisperconfig`) — plus a GitWhisper preview tab that generates a real suggestion from a temporary repository.
+
 **Linux / macOS (Bash):**
 
 ```bash
@@ -127,6 +144,38 @@ powershell -File install.ps1 -Yes -ProfilePath $PROFILE        # PowerShell
 | Uninstall | `--uninstall` | `-Uninstall` | Remove GitWhisper from the profile |
 
 The interactive installers offer a menu with: install/reinstall, change install options (profile, integration type, bin directory), set up a project (hooks + `.gitwhisperconfig`), uninstall, and quit.
+
+### Desktop App (Electron)
+
+A graphical installer built with [Electron](https://www.electronjs.org/) that does everything the terminal wizards do, without typing commands.
+
+#### Run it
+
+| Way | Command |
+|---|---|
+| Pre-built portable exe | `desktop\dist\GitWhisper-Installer-0.3.0.exe` |
+| From source | `cd desktop; npm install; npm start` |
+| Build your own exe | `cd desktop; npm install; npm run dist` |
+
+The build produces `desktop\dist\GitWhisper-Installer-0.3.0.exe`, a self-contained portable executable (no installation needed — it stores its state in the app folder and writes only to your profile and `~/.gitwhisper/`).
+
+#### How to use it
+
+1. **Profile file** — path to your shell profile. On Windows it defaults to `Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`; on Linux/macOS use `~/.bashrc` or `~/.zshrc`. Use **Browse...** to pick a file.
+2. **Integration** — choose how `gitwhisper` becomes available:
+   - **Function in profile** *(default)* — appends a `gitwhisper` function to the profile.
+   - **Executable in bin directory** — creates `gitwhisper.cmd` + `gitwhisper` wrappers in a bin folder and adds it to `PATH` from the profile. The **Bin directory** field becomes editable.
+3. **Profile preview tab** — shows exactly what will be appended to (or removed from) the profile, and whether anything is already installed. No changes happen until you click a button.
+4. **Install** — copies the scripts to `~/.gitwhisper/`, replaces any existing GitWhisper block, and appends the new one. Restart your terminal afterwards (or run `. $PROFILE`).
+5. **Uninstall** — removes the GitWhisper block from the profile and deletes the bin wrappers (if any).
+6. **Set up project...** — pick a git repository and configure it: write `.gitwhisperconfig` (emoji, default message format, hook toggles) and run the `init` hook installation.
+7. **GitWhisper preview tab** — a cheat-sheet of Conventional Commit types + gitmoji, and a **Generate example message** button that runs `gitwhisper suggest` against a temporary git repository for a real, live suggestion.
+
+#### Notes
+
+- The scripts are copied to `~/.gitwhisper/` (not linked to the repo folder), so the app keeps working even if you move or delete the GitWhisper clone.
+- The portable exe is built unsigned (`signAndEditExecutable: false`). SmartScreen may show a warning on first run — click *More info → Run anyway*.
+- Headless test for the main-process logic: `node desktop/test-main.js` (30 checks: install/uninstall/replace/bin-dir detection/project setup/demo).
 
 ### 2. Use in any project
 
@@ -514,6 +563,12 @@ GitWhisper/
 ├── install.ps1             # Global install for PowerShell (interactive wizard)
 ├── install-gui.ps1         # Global install for PowerShell (WPF GUI + visualizer)
 ├── install.sh              # Global install for Bash/Zsh (interactive wizard)
+├── desktop/                # Electron desktop app (graphical installer)
+│   ├── main.js             # App + install/uninstall/preview/demo/project IPC logic
+│   ├── preload.js          # contextBridge between UI and main process
+│   ├── renderer/           # UI (index.html + renderer.js)
+│   ├── test-main.js        # Headless tests for the main process logic
+│   └── dist/               # Built portable exe (GitWhisper-Installer-0.3.0.exe)
 ├── CHANGELOG.md            # Auto-generated changelog
 ├── LICENSE                 # MIT license
 ├── logo.png                # Project logo

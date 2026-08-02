@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>GitWhisper Installer</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --panel2: #111827;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --mono: Consolas, "Cascadia Mono", "Courier New", monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--text);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 13.5px;
+      user-select: none;
+    }
+    .app { display: flex; flex-direction: column; height: 100vh; padding: 14px; gap: 12px; }
+
+    header {
+      background: linear-gradient(135deg, #1e1b4b, #312e81);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px;
+    }
+    header h1 { margin: 0; font-size: 21px; }
+    header p { margin: 2px 0 0; color: var(--muted); }
+
+    .options {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px;
+      display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: center;
+    }
+    .options label { color: var(--muted); white-space: nowrap; }
+    .options .field { display: flex; gap: 8px; }
+    input[type="text"] {
+      flex: 1; background: var(--panel2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 9px; font-family: var(--mono); font-size: 12.5px;
+    }
+    .radios { display: flex; gap: 18px; }
+    .radios label { color: var(--text); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
+
+    .actions { display: flex; gap: 8px; }
+    button {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 7px;
+      padding: 7px 16px; font-size: 13px; cursor: pointer;
+      font-family: inherit;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    button.primary:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .tabbar { display: flex; gap: 4px; padding: 0 4px; }
+    .tabbar button {
+      border-radius: 8px 8px 0 0; border-bottom: none;
+      background: transparent; color: var(--muted);
+    }
+    .tabbar button.active { background: var(--panel); color: var(--text); border-color: var(--border); }
+    .tabpanel {
+      flex: 1; min-height: 0; background: var(--panel);
+      border: 1px solid var(--border); border-top: none;
+      border-radius: 0 0 10px 10px; padding: 10px;
+      display: flex; flex-direction: column;
+    }
+    pre {
+      flex: 1; min-height: 0; overflow: auto; margin: 0;
+      background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5;
+      color: #dbe4f3; white-space: pre-wrap; word-break: break-all;
+      user-select: text;
+    }
+    .demorow { display: flex; gap: 8px; margin-top: 10px; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .hint.error { color: var(--err); }
+    .hint.ok { color: var(--ok); }
+
+    .statusbar {
+      background: #eef2ff; color: #3730a3; border-radius: 8px;
+      padding: 8px 12px; font-size: 12.5px; min-height: 34px;
+      display: flex; align-items: center;
+    }
+    .statusbar.ok { background: #f0fdf4; color: #15803d; }
+    .statusbar.warn { background: #fffbeb; color: #b45309; }
+    .statusbar.error { background: #fef2f2; color: #b91c1c; }
+
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(2, 6, 23, 0.7);
+      display: none; align-items: center; justify-content: center;
+    }
+    .modal-backdrop.show { display: flex; }
+    .modal {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px; width: 440px;
+    }
+    .modal h3 { margin: 0 0 4px; }
+    .modal .sub { color: var(--muted); margin: 0 0 14px; }
+    .modal .row { margin-bottom: 10px; }
+    .modal .row label { display: block; color: var(--muted); margin-bottom: 4px; }
+    .modal .row .field { display: flex; gap: 8px; }
+    .modal .row select, .modal .row input[type="checkbox"] { accent-color: var(--accent); }
+    .modal .chkrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--text); }
+    .modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>GitWhisper Installer</h1>
+      <p>Conventional Commits + gitmoji, automatically.</p>
+    </header>
+
+    <section class="options">
+      <label for="profile">Profile file:</label>
+      <div class="field">
+        <input id="profile" type="text" />
+        <button id="browseProfile">Browse...</button>
+      </div>
+      <label>Integration:</label>
+      <div class="radios">
+        <label><input type="radio" name="itype" value="function" checked /> Function in profile</label>
+        <label><input type="radio" name="itype" value="bin" /> Executable in bin directory</label>
+      </div>
+      <label for="bindir">Bin directory:</label>
+      <div class="field">
+        <input id="bindir" type="text" disabled />
+        <button id="browseBin" disabled>Browse...</button>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="install" class="primary">Install</button>
+      <button id="uninstall">Uninstall</button>
+      <button id="project">Set up project...</button>
+      <button id="exit">Exit</button>
+    </div>
+
+    <section class="tabs">
+      <div class="tabbar">
+        <button id="tabProfile" class="active">Profile preview</button>
+        <button id="tabGw">GitWhisper preview</button>
+      </div>
+      <div class="tabpanel">
+        <pre id="profilePreview">Loading...</pre>
+        <div id="profileStatus" class="hint"></div>
+      </div>
+      <div class="tabpanel" style="display:none">
+        <pre id="gwPreview"></pre>
+        <div class="demorow">
+          <input id="demoDesc" type="text" value="adds a login form with validation" />
+          <button id="demoBtn">Generate example message</button>
+        </div>
+        <div id="demoStatus" class="hint"></div>
+      </div>
+    </section>
+
+    <div class="statusbar" id="status">Ready.</div>
+  </div>
+
+  <div class="modal-backdrop" id="backdrop">
+    <div class="modal">
+      <h3>Set up project</h3>
+      <p class="sub">Install GitWhisper hooks and config for a git project.</p>
+      <div class="row">
+        <label for="projDir">Project directory</label>
+        <div class="field">
+          <input id="projDir" type="text" />
+          <button id="projBrowse">Browse...</button>
+        </div>
+      </div>
+      <div class="row chkrow"><input id="chkEmoji" type="checkbox" checked /> Include emoji in commit messages</div>
+      <div class="row">
+        <label for="cboDefault">Default message format</label>
+        <select id="cboDefault" style="width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;">
+          <option>1 - simple + emoji</option>
+          <option>2 - simple</option>
+          <option>3 - detailed + emoji</option>
+          <option>4 - detailed</option>
+        </select>
+      </div>
+      <div class="row chkrow"><input id="chkPrepare" type="checkbox" checked /> Enable pre-fill hook (prepare-commit-msg)</div>
+      <div class="row chkrow"><input id="chkValidate" type="checkbox" checked /> Enforce Conventional Commits (commit-msg hook)</div>
+      <div class="modal-actions">
+        <button id="projApply" class="primary">Apply</button>
+        <button id="projCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
