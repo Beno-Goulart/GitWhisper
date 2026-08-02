@@ -222,6 +222,60 @@ test_suggest_multiple_and_empty() {
     fi
 }
 
+test_suggest_branch_type() {
+    new_repo
+    echo "base" > login.js
+    git add login.js
+    make_baseline login.js
+    git checkout -b feat/login
+    printf 'x2\n' > login.js
+    git add login.js
+    run_sh "" suggest
+    check_contains "branch feat overrides fix" "feat(login)" "$RUN_OUT"
+    check_not_contains "branch feat not fix" "fix(login)" "$RUN_OUT"
+
+    new_repo
+    git checkout -b fix/button
+    add_file "button.js" "function btn(){}"
+    run_sh "" suggest
+    check_contains "branch fix overrides feat" "fix(button)" "$RUN_OUT"
+
+    new_repo
+    git checkout -b feat/login
+    add_file "README.md" "# hi"
+    run_sh "" suggest
+    check_contains "strong docs not overridden by feat branch" "docs" "$RUN_OUT"
+    check_not_contains "docs branch keeps docs type" "feat(" "$RUN_OUT"
+
+    new_repo
+    git checkout -b fix/login
+    add_file "app.test.js" "test()"
+    run_sh "" suggest
+    check_contains "strong test not overridden by fix branch" "test" "$RUN_OUT"
+
+    new_repo
+    echo "a" > a.js
+    echo "b" > b.js
+    git add a.js b.js
+    make_baseline a.js b.js
+    git checkout -b chore/core
+    printf 'x\n' > a.js
+    printf 'y\n' > b.js
+    git add a.js b.js
+    run_sh "" suggest
+    check_contains "branch chore overrides refactor" "chore(core)" "$RUN_OUT"
+
+    new_repo
+    echo "x" > app.js
+    git add app.js
+    make_baseline app.js
+    git checkout -b login
+    printf 'x2\n' > app.js
+    git add app.js
+    run_sh "" suggest
+    check_contains "branch without prefix keeps diff fix" "fix(app)" "$RUN_OUT"
+}
+
 test_suggest_config() {
     new_repo
     add_file "app.js" "console.log(1)"
@@ -507,6 +561,25 @@ test_parity_cases() {
     printf '\nWrite-Host "noise feat perf docs"\n' >> gitwhisper.ps1
     git add gitwhisper.ps1
     test_parity "modified self ps1"
+
+    new_repo
+    echo "base" > login.js
+    git add login.js
+    make_baseline login.js
+    git checkout -b feat/login
+    printf 'x2\n' > login.js
+    git add login.js
+    test_parity "branch feat overrides fix"
+
+    new_repo
+    git checkout -b fix/button
+    add_file "button.js" "function btn(){}"
+    test_parity "branch fix overrides feat"
+
+    new_repo
+    git checkout -b feat/login
+    add_file "README.md" "# hi"
+    test_parity "branch feat keeps strong docs"
 }
 
 #
@@ -584,6 +657,7 @@ echo "--- suggest / message generation ---"
 test_suggest_basics
 test_suggest_scopes_and_types
 test_suggest_multiple_and_empty
+test_suggest_branch_type
 test_suggest_config
 echo ""
 echo "--- init ---"

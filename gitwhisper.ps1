@@ -637,6 +637,35 @@ function Get-BranchScope {
     return ""
 }
 
+function Get-BranchType {
+    try {
+        $branch = git symbolic-ref --short HEAD 2>$null
+    } catch {
+        $branch = ""
+    }
+    if (-not $branch) { return "" }
+    switch (($branch -split "/")[0]) {
+        "feat"        { return "feat" }
+        "feature"     { return "feat" }
+        "fix"         { return "fix" }
+        "bugfix"      { return "fix" }
+        "bug"         { return "fix" }
+        "hotfix"      { return "fix" }
+        "docs"        { return "docs" }
+        "doc"         { return "docs" }
+        "test"        { return "test" }
+        "tests"       { return "test" }
+        "chore"       { return "chore" }
+        "refactor"    { return "refactor" }
+        "refactoring" { return "refactor" }
+        "perf"        { return "perf" }
+        "style"       { return "style" }
+        "ci"          { return "ci" }
+        "build"       { return "build" }
+    }
+    return ""
+}
+
 function Get-CommitType {
     param(
         [string[]]$Added,
@@ -820,11 +849,11 @@ function Get-CommitType {
             $name = [System.IO.Path]::GetFileName($Deleted[0])
             $baseName = [System.IO.Path]::GetFileNameWithoutExtension($Deleted[0])
             if ($specificDesc) {
-                return @{ Type = "refactor"; Desc = "$specificDesc from $name" }
+                return @{ Type = "refactor"; Desc = "$specificDesc from $name"; Strong = $false }
             }
-            return @{ Type = "refactor"; Desc = "removes $name" }
+            return @{ Type = "refactor"; Desc = "removes $name"; Strong = $false }
         } else {
-            return @{ Type = "refactor"; Desc = "removes $($Deleted.Count) files" }
+            return @{ Type = "refactor"; Desc = "removes $($Deleted.Count) files"; Strong = $false }
         }
     }
 
@@ -920,11 +949,11 @@ function Get-CommitType {
                 return @{ Type = "docs"; Desc = "adds $name" }
             }
             if ($specificDesc) {
-                return @{ Type = "feat"; Desc = "$specificDesc in $baseName" }
+                return @{ Type = "feat"; Desc = "$specificDesc in $baseName"; Strong = $false }
             }
-            return @{ Type = "feat"; Desc = "adds $name" }
+            return @{ Type = "feat"; Desc = "adds $name"; Strong = $false }
         }
-        return @{ Type = "feat"; Desc = "adds $($Added.Count) files" }
+        return @{ Type = "feat"; Desc = "adds $($Added.Count) files"; Strong = $false }
     }
 
     if ($Added.Count -eq 0 -and $Modified.Count -gt 0 -and $Deleted.Count -eq 0) {
@@ -943,21 +972,21 @@ function Get-CommitType {
                 return @{ Type = "style"; Desc = "fixes styles in $baseName" }
             }
             if ($specificDesc) {
-                return @{ Type = "fix"; Desc = "$specificDesc in $baseName" }
+                return @{ Type = "fix"; Desc = "$specificDesc in $baseName"; Strong = $false }
             }
-            return @{ Type = "fix"; Desc = "fixes $name" }
+            return @{ Type = "fix"; Desc = "fixes $name"; Strong = $false }
         }
-        return @{ Type = "refactor"; Desc = "updates $($Modified.Count) files" }
+        return @{ Type = "refactor"; Desc = "updates $($Modified.Count) files"; Strong = $false }
     }
 
     if ($specificDesc) {
-        return @{ Type = "refactor"; Desc = $specificDesc }
+        return @{ Type = "refactor"; Desc = $specificDesc; Strong = $false }
     }
     $parts = @()
     if ($Added.Count -gt 0)    { $parts += "$($Added.Count) added" }
     if ($Modified.Count -gt 0) { $parts += "$($Modified.Count) modified" }
     if ($Deleted.Count -gt 0)  { $parts += "$($Deleted.Count) removed" }
-    return @{ Type = "refactor"; Desc = ($parts -join ", ") }
+    return @{ Type = "refactor"; Desc = ($parts -join ", "); Strong = $false }
 }
 
 function Invoke-Pr {
@@ -1718,6 +1747,11 @@ function Get-SuggestedMessage {
 
     $type = $result.Type
     $desc = $result.Desc
+
+    if ($result.Strong -eq $false) {
+        $branchType = Get-BranchType
+        if ($branchType) { $type = $branchType }
+    }
 
     $addedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^\+[^+]" }) -join "`n"
     $removedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^-[^-]" }) -join "`n"

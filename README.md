@@ -60,6 +60,7 @@ PS C:\MyProject> gitwhisper
 | Feature | Description |
 |---|---|
 | Type Detection | Auto-detects feat, fix, docs, style, refactor, perf, test, build, ci, chore |
+| Branch Conventions | Detects the commit type from the branch name prefix (`feat/`, `fix/`, `docs/`, ...) |
 | Scope Inference | Reads folder structure to determine scope (auth, api, ui, etc.) |
 | Specific Descriptions | Analyzes diff content for imports, functions, classes, hooks, routes |
 | Self-Noise Filter | Ignores literal strings from GitWhisper's own files (`gitwhisper.*`) when analyzing the diff, so script edits produce clean messages |
@@ -266,6 +267,25 @@ src/
 | Multiple directories | Picks the one with ≥60% of changed files |
 | Single file | Uses filename without extension |
 | Root-level files | No scope |
+
+## Branch Type Detection
+
+The commit type is also inferred from the branch name prefix. The branch type only applies when the diff analysis produced a *generic* result (single-file add/modify or a `refactor` fallback); precise signals such as `docs`, `test`, `style`, `perf`, `ci`, `build`, `chore` (config-only) and database migrations keep their diff-derived type.
+
+| Branch prefix | Commit type |
+|---|---|
+| `feat/`, `feature/` | `feat` |
+| `fix/`, `bugfix/`, `bug/`, `hotfix/` | `fix` |
+| `docs/`, `doc/` | `docs` |
+| `test/`, `tests/` | `test` |
+| `chore/` | `chore` |
+| `refactor/`, `refactoring/` | `refactor` |
+| `perf/` | `perf` |
+| `style/` | `style` |
+| `ci/` | `ci` |
+| `build/` | `build` |
+
+Examples: on branch `feat/login`, modifying a single file produces `feat` (not `fix`); on branch `fix/button`, adding a file produces `fix` (not `feat`); but touching `README.md` on a `feat/` branch still produces `docs`.
 
 ## Specific Descriptions
 

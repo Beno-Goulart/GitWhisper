@@ -260,6 +260,24 @@ get_branch_scope() {
     fi
 }
 
+get_branch_type() {
+    local branch
+    branch=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+    [[ -z "$branch" ]] && return
+    case "${branch%%/*}" in
+        feat|feature)            echo "feat" ;;
+        fix|bugfix|bug|hotfix)   echo "fix" ;;
+        docs|doc)                echo "docs" ;;
+        test|tests)              echo "test" ;;
+        chore)                   echo "chore" ;;
+        refactor|refactoring)    echo "refactor" ;;
+        perf)                    echo "perf" ;;
+        style)                   echo "style" ;;
+        ci)                      echo "ci" ;;
+        build)                   echo "build" ;;
+    esac
+}
+
 is_test_file() {
     [[ "$1" =~ (test|spec|\.test\.|\.spec\.) ]]
 }
@@ -432,8 +450,10 @@ prepare_message() {
 
     COMMIT_TYPE=""
     COMMIT_DESC=""
+    COMMIT_STRONG=true
 
     if [[ ${#DELETED[@]} -gt 0 && ${#ADDED[@]} -eq 0 && ${#MODIFIED[@]} -eq 0 ]]; then
+        COMMIT_STRONG=false
         COMMIT_TYPE="refactor"
         if [[ ${#DELETED[@]} -eq 1 ]]; then
             NAME=$(basename "${DELETED[0]}")
@@ -503,6 +523,7 @@ prepare_message() {
                     COMMIT_DESC="adds $NAME"
                     ;;
                 *)
+                    COMMIT_STRONG=false
                     if [[ -n "$SPECIFIC_DESC" ]]; then
                         COMMIT_DESC="$SPECIFIC_DESC in $(basename "$NAME" | sed "s/\.[^.]*$//")"
                     else
@@ -511,6 +532,7 @@ prepare_message() {
                     ;;
             esac
         else
+            COMMIT_STRONG=false
             COMMIT_DESC="adds ${#ADDED[@]} files"
         fi
     elif [[ ${#ADDED[@]} -eq 0 && ${#MODIFIED[@]} -gt 0 && ${#DELETED[@]} -eq 0 ]]; then
@@ -527,6 +549,7 @@ prepare_message() {
                     COMMIT_DESC="fixes styles in $(basename "$NAME" | sed "s/\.[^.]*$//")"
                     ;;
                 *)
+                    COMMIT_STRONG=false
                     COMMIT_TYPE="fix"
                     if [[ -n "$SPECIFIC_DESC" ]]; then
                         COMMIT_DESC="$SPECIFIC_DESC in $(basename "$NAME" | sed "s/\.[^.]*$//")"
@@ -536,10 +559,12 @@ prepare_message() {
                     ;;
             esac
         else
+            COMMIT_STRONG=false
             COMMIT_TYPE="refactor"
             COMMIT_DESC="updates ${#MODIFIED[@]} files"
         fi
     else
+        COMMIT_STRONG=false
         COMMIT_TYPE="refactor"
         if [[ -n "$SPECIFIC_DESC" ]]; then
             COMMIT_DESC="$SPECIFIC_DESC"
@@ -550,6 +575,11 @@ prepare_message() {
             [[ ${#DELETED[@]} -gt 0 ]] && PARTS+=("${#DELETED[@]} removed")
             COMMIT_DESC=$(IFS=', '; echo "${PARTS[*]}")
         fi
+    fi
+
+    BRANCH_TYPE=$(get_branch_type)
+    if [[ -n "$BRANCH_TYPE" && "$COMMIT_STRONG" == "false" ]]; then
+        COMMIT_TYPE="$BRANCH_TYPE"
     fi
 
     SCOPE=$(get_scope "${ALL_FILES[@]}")
