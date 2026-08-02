@@ -44,9 +44,9 @@ Write-Host "  $profilePath" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  Available commands:" -ForegroundColor White
 Write-Host "    gitwhisper            " -ForegroundColor Cyan -NoNewline
-Write-Host "- unified command (commit, undo, changelog)" -ForegroundColor DarkGray
+Write-Host "- unified command (commit, undo, changelog, release, pr)" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "  Usage: gitwhisper [commit|undo|changelog|help]" -ForegroundColor Cyan
+Write-Host "  Usage: gitwhisper [commit|undo|amend|changelog|release|pr|help]" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Restart your terminal or run:" -ForegroundColor Yellow
 Write-Host "    . `$PROFILE" -ForegroundColor White

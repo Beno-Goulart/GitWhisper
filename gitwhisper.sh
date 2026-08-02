@@ -12,6 +12,10 @@ show_help() {
     echo "    gitwhisper undo          - undo last commit"
     echo "    gitwhisper amend         - amend last commit"
     echo "    gitwhisper changelog     - generate changelog"
+    echo "    gitwhisper release       - create release (changelog + tag)"
+    echo "    gitwhisper release --push   - push commit and tag after release"
+    echo "    gitwhisper release --minor  - force minor bump (major/minor/patch)"
+    echo "    gitwhisper release --version 1.2.3 - use explicit version"
     echo "    gitwhisper help          - show this help"
     echo "    gitwhisper pr            - generate PR description"
     echo "    gitwhisper pr --base main   - specify base branch"
@@ -36,28 +40,6 @@ if [[ ! -d ".git" ]]; then
     echo -e "\033[31mError: Not a git repository.\033[0m"
     exit 1
 fi
-
-case "$CMD" in
-    ""|commit)
-        invoke_commit
-        ;;
-    undo)
-        invoke_undo
-        ;;
-    amend)
-        invoke_amend
-        ;;
-    changelog)
-        invoke_changelog "$@"
-        ;;
-    pr)
-        invoke_pr "$@"
-        ;;
-    *)
-        echo "Unknown command: $CMD"
-        show_help
-        ;;
-esac
 
 invoke_undo() {
     LAST_MSG=$(git log -1 --format="%s" 2>/dev/null)
@@ -825,7 +807,7 @@ invoke_changelog() {
             *)        OTHER+=("$COMMIT_ENTRY") ;;
         esac
 
-        ((TOTAL++))
+        TOTAL=$((TOTAL + 1))
     done <<< "$LOG"
 
     if [[ $TOTAL -eq 0 ]]; then
@@ -992,7 +974,7 @@ invoke_pr() {
             revert)   REVERT+=("$ENTRY") ;;
             *)        OTHER+=("$ENTRY") ;;
         esac
-        ((TOTAL++))
+        TOTAL=$((TOTAL + 1))
     done <<< "$LOG"
 
     if [[ $TOTAL -eq 0 ]]; then
@@ -1110,3 +1092,272 @@ invoke_pr() {
         fi
     fi
 }
+
+invoke_release() {
+    local push=false
+    local force_type=""
+    local version_override=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --push) push=true; shift ;;
+            --major) force_type="major"; shift ;;
+            --minor) force_type="minor"; shift ;;
+            --patch) force_type="patch"; shift ;;
+            --dry-run|-n) DRY_RUN=true; shift ;;
+            --version) version_override="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+        echo ""
+        echo -e "  \033[33mWorking tree has uncommitted changes.\033[0m"
+        read -p "  Continue anyway? (y/n): " CONT
+        if [[ "$CONT" != "y" && "$CONT" != "Y" ]]; then
+            echo ""
+            echo -e "  \033[33mCancelled.\033[0m"
+            exit 0
+        fi
+    fi
+
+    LAST_TAG=""
+    if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+        LAST_TAG=$(git describe --tags --abbrev=0)
+    fi
+
+    if [[ -n "$LAST_TAG" ]]; then
+        LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad" --date=short)
+    else
+        echo ""
+        echo -e "  \033[33mNo tags found. Releasing from the beginning of history.\033[0m"
+        LOG=$(git log --pretty=format:"%H|%s|%ad" --date=short)
+    fi
+
+    if [[ -z "$LOG" ]]; then
+        echo -e "\033[33mNo commits to release.\033[0m"
+        exit 0
+    fi
+
+    declare -a FEAT=() FIX=() PERF=() REFACTOR=() DOCS=() TEST=()
+    declare -a BUILD=() CI=() CHORE=() STYLE=() REVERT=() OTHER=()
+    HAS_BREAKING=false
+    TOTAL=0
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        HASH=$(echo "$line" | cut -d'|' -f1)
+        MESSAGE=$(echo "$line" | cut -d'|' -f2)
+        SHORT_HASH="${HASH:0:7}"
+
+        TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+\(' | head -1 | tr -d '(')
+        if [[ -z "$TYPE" ]]; then
+            TYPE=$(echo "$MESSAGE" | grep -oE '[a-z]+:' | head -1 | tr -d ':')
+        fi
+        SCOPE=$(echo "$MESSAGE" | grep -oE '\([^)]+\)' | tr -d '()')
+        DESC=$(echo "$MESSAGE" | sed 's/.*:[[:space:]]*//')
+
+        COMMIT_ENTRY="- "
+        if [[ -n "$SCOPE" ]]; then
+            COMMIT_ENTRY+="**${SCOPE}:** "
+        fi
+        COMMIT_ENTRY+="${DESC} (\`${SHORT_HASH}\`)"
+
+        if [[ "$MESSAGE" == *"!"* || "$MESSAGE" == *"BREAKING CHANGE"* ]]; then
+            HAS_BREAKING=true
+        fi
+
+        case "$TYPE" in
+            feat)     FEAT+=("$COMMIT_ENTRY") ;;
+            fix)      FIX+=("$COMMIT_ENTRY") ;;
+            perf)     PERF+=("$COMMIT_ENTRY") ;;
+            refactor) REFACTOR+=("$COMMIT_ENTRY") ;;
+            docs)     DOCS+=("$COMMIT_ENTRY") ;;
+            test)     TEST+=("$COMMIT_ENTRY") ;;
+            build)    BUILD+=("$COMMIT_ENTRY") ;;
+            ci)       CI+=("$COMMIT_ENTRY") ;;
+            chore)    CHORE+=("$COMMIT_ENTRY") ;;
+            style)    STYLE+=("$COMMIT_ENTRY") ;;
+            revert)   REVERT+=("$COMMIT_ENTRY") ;;
+            *)        OTHER+=("$COMMIT_ENTRY") ;;
+        esac
+
+        TOTAL=$((TOTAL + 1))
+    done <<< "$LOG"
+
+    if [[ $TOTAL -eq 0 ]]; then
+        echo -e "\033[33mNo conventional commits found since last release.\033[0m"
+        exit 0
+    fi
+
+    if [[ -n "$LAST_TAG" ]]; then
+        CURRENT_VERSION="${LAST_TAG#v}"
+    else
+        CURRENT_VERSION="0.1.0"
+    fi
+
+    IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+    if [[ -n "$version_override" ]]; then
+        NEW_VERSION="${version_override#v}"
+    elif [[ "$force_type" == "major" ]]; then
+        NEW_VERSION="$((MAJOR + 1)).0.0"
+    elif [[ "$force_type" == "minor" ]]; then
+        NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+    elif [[ "$force_type" == "patch" ]]; then
+        NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+    elif [[ "$HAS_BREAKING" == true ]]; then
+        NEW_VERSION="$((MAJOR + 1)).0.0"
+    elif [[ ${#FEAT[@]} -gt 0 ]]; then
+        NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+    else
+        NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+    fi
+
+    TAG_NAME="v$NEW_VERSION"
+
+    if git rev-parse --verify "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+        echo -e "\033[31mTag $TAG_NAME already exists.\033[0m"
+        exit 1
+    fi
+
+    TODAY=$(date +%Y-%m-%d)
+
+    SECTION="## [$NEW_VERSION]($TODAY)"
+    SECTION+=$'\n'$'\n'
+
+    append_release_section() {
+        local title="$1"
+        shift
+        local arr=("$@")
+        if [[ ${#arr[@]} -gt 0 ]]; then
+            SECTION+="### $title"$'\n'$'\n'
+            for entry in "${arr[@]}"; do
+                SECTION+="$entry"$'\n'
+            done
+            SECTION+=$'\n'
+        fi
+    }
+
+    append_release_section "Features" "${FEAT[@]}"
+    append_release_section "Bug Fixes" "${FIX[@]}"
+    append_release_section "Performance" "${PERF[@]}"
+    append_release_section "Refactoring" "${REFACTOR[@]}"
+    append_release_section "Documentation" "${DOCS[@]}"
+    append_release_section "Tests" "${TEST[@]}"
+    append_release_section "Build" "${BUILD[@]}"
+    append_release_section "CI/CD" "${CI[@]}"
+    append_release_section "Chores" "${CHORE[@]}"
+    append_release_section "Style" "${STYLE[@]}"
+    append_release_section "Reverts" "${REVERT[@]}"
+    append_release_section "Other" "${OTHER[@]}"
+
+    CHANGELOG_FILE="CHANGELOG.md"
+    TMP_CONTENT=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-release.txt")
+
+    if [[ -f "$CHANGELOG_FILE" ]] && grep -q '^## \[' "$CHANGELOG_FILE" 2>/dev/null; then
+        FIRST_LINE=$(grep -n '^## \[' "$CHANGELOG_FILE" | head -1 | cut -d: -f1)
+        {
+            head -n $((FIRST_LINE - 1)) "$CHANGELOG_FILE"
+            echo "$SECTION"
+            echo ""
+            tail -n +"$FIRST_LINE" "$CHANGELOG_FILE"
+        } > "$TMP_CONTENT"
+    else
+        {
+            echo "# Changelog"
+            echo ""
+            echo "All notable changes to this project will be documented in this file."
+            echo ""
+            echo "Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)"
+            echo ""
+            echo "$SECTION"
+        } > "$TMP_CONTENT"
+    fi
+
+    echo ""
+    echo -e "\033[32m=== Release preview ===\033[0m"
+    echo ""
+    echo -e "  Version:  \033[36m$NEW_VERSION\033[0m"
+    echo -e "  Commits:  \033[36m$TOTAL\033[0m"
+    echo -e "  Breaking: \033[36m$HAS_BREAKING\033[0m"
+    echo ""
+    echo -e "\033[36m=== Changelog section ===\033[0m"
+    echo ""
+    echo "$SECTION" | while IFS= read -r line; do
+        echo "  $line"
+    done
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo ""
+        echo -e "  \033[90m[DRY-RUN] Release skipped. No changes made.\033[0m"
+        rm -f "$TMP_CONTENT"
+        exit 0
+    fi
+
+    echo ""
+    read -p "  Proceed with release v$NEW_VERSION? (y/n): " CONFIRM
+    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+        echo ""
+        echo -e "  \033[33mCancelled.\033[0m"
+        rm -f "$TMP_CONTENT"
+        exit 0
+    fi
+
+    echo ""
+    echo -e "  \033[36mWriting CHANGELOG.md...\033[0m"
+    mv "$TMP_CONTENT" "$CHANGELOG_FILE"
+    git add "$CHANGELOG_FILE"
+
+    COMMIT_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-commit.txt")
+    printf 'chore(release): %s\n\n%s\n' "$TAG_NAME" "$SECTION" > "$COMMIT_FILE"
+    git commit -F "$COMMIT_FILE" >/dev/null || { rm -f "$COMMIT_FILE"; echo -e "  \033[31mRelease commit failed.\033[0m"; exit 1; }
+    rm -f "$COMMIT_FILE"
+
+    echo -e "  \033[36mCreating tag $TAG_NAME...\033[0m"
+    TAG_FILE=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/gitwhisper-tag.txt")
+    printf '%s\n' "$SECTION" > "$TAG_FILE"
+    git tag -a "$TAG_NAME" -F "$TAG_FILE" || { rm -f "$TAG_FILE"; echo -e "  \033[31mTag creation failed.\033[0m"; exit 1; }
+    rm -f "$TAG_FILE"
+
+    echo ""
+    echo -e "  \033[32mRelease $TAG_NAME created!\033[0m"
+
+    if [[ "$push" == true ]]; then
+        PUSH_CHOICE="y"
+    else
+        read -p "  Push commit and tag? (y/n): " PUSH_CHOICE
+    fi
+    if [[ "$PUSH_CHOICE" == "y" || "$PUSH_CHOICE" == "Y" ]]; then
+        echo ""
+        echo -e "  \033[36mPushing...\033[0m"
+        git push >/dev/null || { echo -e "  \033[31mPush failed.\033[0m"; exit 1; }
+        git push origin "$TAG_NAME" >/dev/null || { echo -e "  \033[31mTag push failed.\033[0m"; exit 1; }
+        echo -e "  \033[32mPushed successfully!\033[0m"
+    fi
+}
+
+case "$CMD" in
+    ""|commit)
+        invoke_commit
+        ;;
+    undo)
+        invoke_undo
+        ;;
+    amend)
+        invoke_amend
+        ;;
+    changelog)
+        invoke_changelog "$@"
+        ;;
+    pr)
+        invoke_pr "$@"
+        ;;
+    release)
+        invoke_release "$@"
+        ;;
+    *)
+        echo "Unknown command: $CMD"
+        show_help
+        ;;
+esac
