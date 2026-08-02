@@ -622,6 +622,81 @@ NOISE
 }
 
 #
+# installers (install.sh / install.ps1)
+#
+test_installers() {
+    INST_SH="$ROOT/install.sh"
+    INST_PS1="$ROOT/install.ps1"
+
+    # ---- sh: check mode ----
+    bash "$INST_SH" --check --profile "$TMP/install_check_prof" >/dev/null 2>&1
+    check_exit "sh --check exits 0" 0 "$?"
+
+    # ---- sh: batch function install ----
+    SH_PROF="$TMP/install_sh_prof"
+    SH_BIN="$TMP/install_sh_bin"
+    bash "$INST_SH" --yes --profile "$SH_PROF" >/dev/null 2>&1
+    check_exit "sh install function exits 0" 0 "$?"
+    [ -f "$SH_PROF" ] && grep -q "# >>> GitWhisper >>>" "$SH_PROF" \
+        && pass "sh install appends marker block" \
+        || fail "sh install appends marker block"
+    grep -q "gitwhisper()" "$SH_PROF" && pass "sh install adds function" || fail "sh install adds function"
+
+    # ---- sh: idempotent reinstall ----
+    bash "$INST_SH" --yes --profile "$SH_PROF" >/dev/null 2>&1
+    markers=$(grep -c "# >>> GitWhisper >>>" "$SH_PROF")
+    [ "$markers" = "1" ] && pass "sh reinstall keeps one block" || fail "sh reinstall keeps one block" "markers=$markers"
+
+    # ---- sh: bin type ----
+    bash "$INST_SH" --yes --profile "$SH_PROF" --type bin --bin-dir "$SH_BIN" >/dev/null 2>&1
+    check_exit "sh install bin exits 0" 0 "$?"
+    [ -x "$SH_BIN/gitwhisper" ] && pass "sh bin wrapper created + executable" || fail "sh bin wrapper created + executable"
+    grep -q "export PATH=\"$SH_BIN" "$SH_PROF" && pass "sh bin adds PATH export" || fail "sh bin adds PATH export"
+
+    # ---- sh: uninstall ----
+    bash "$INST_SH" --uninstall --profile "$SH_PROF" >/dev/null 2>&1
+    check_exit "sh uninstall exits 0" 0 "$?"
+    grep -q "# >>> GitWhisper >>>" "$SH_PROF" && fail "sh uninstall removes block" || pass "sh uninstall removes block"
+    [ -e "$SH_BIN/gitwhisper" ] && fail "sh uninstall removes wrapper" || pass "sh uninstall removes wrapper"
+
+    # ---- sh: interactive wizard - change profile option then install ----
+    WIZ_PROF1="$TMP/install_wiz1"
+    WIZ_PROF2="$TMP/install_wiz2"
+    printf '2\n1\n%s\ni\n5\n' "$WIZ_PROF2" | bash "$INST_SH" --profile "$WIZ_PROF1" >/dev/null 2>&1
+    check_exit "sh wizard (edit options + install) exits 0" 0 "$?"
+    [ -f "$WIZ_PROF2" ] && grep -q "# >>> GitWhisper >>>" "$WIZ_PROF2" \
+        && pass "sh wizard installs into edited profile" \
+        || fail "sh wizard installs into edited profile"
+
+    # ---- ps1: batch install + uninstall ----
+    if command -v powershell.exe >/dev/null 2>&1 || command -v pwsh >/dev/null 2>&1; then
+        local ps_cmd="powershell.exe"
+        if ! command -v powershell.exe >/dev/null 2>&1; then
+            ps_cmd="pwsh"
+        fi
+        local inst_ps1_win="$INST_PS1"
+        if command -v cygpath >/dev/null 2>&1; then
+            inst_ps1_win=$(cygpath -m "$INST_PS1")
+        fi
+        PS_PROF="$TMP/install_ps1_prof.ps1"
+        PS_PROF_WIN="$PS_PROF"
+        if command -v cygpath >/dev/null 2>&1; then
+            PS_PROF_WIN=$(cygpath -w "$PS_PROF")
+        fi
+        "$ps_cmd" -NoProfile -ExecutionPolicy Bypass -File "$inst_ps1_win" -Yes -ProfilePath "$PS_PROF_WIN" >/dev/null 2>&1
+        check_exit "ps1 install exits 0" 0 "$?"
+        [ -f "$PS_PROF" ] && grep -q "GitWhisper >>>" "$PS_PROF" \
+            && pass "ps1 install appends marker block" \
+            || fail "ps1 install appends marker block"
+        "$ps_cmd" -NoProfile -ExecutionPolicy Bypass -File "$inst_ps1_win" -Uninstall -ProfilePath "$PS_PROF_WIN" >/dev/null 2>&1
+        check_exit "ps1 uninstall exits 0" 0 "$?"
+        grep -q "GitWhisper >>>" "$PS_PROF" && fail "ps1 uninstall removes block" || pass "ps1 uninstall removes block"
+    else
+        echo "  skip ps1 installer tests (no powershell.exe/pwsh)"
+    fi
+}
+
+#
 # commit-dependent tests (only when GW_TEST_COMMITS=1; require working `git commit`)
 #
 test_commit_flow() {
@@ -674,6 +749,9 @@ test_interactive_commit
 echo ""
 echo "--- self-script noise filtering ---"
 test_self_script_noise
+echo ""
+echo "--- installers ---"
+test_installers
 echo ""
 echo "--- parity ps1 vs sh ---"
 test_parity_cases

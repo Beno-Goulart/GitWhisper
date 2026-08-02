@@ -88,6 +88,14 @@ cd GitWhisper
 .\install.ps1
 ```
 
+**Windows — graphical installer:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-gui.ps1
+```
+
+The GUI installer has two visualizer tabs: **Profile preview** (shows exactly what will be added to or removed from your profile and bin directory before you apply it) and **GitWhisper preview** (type conventions + a live message generator that runs `gitwhisper suggest` against a temporary repository).
+
 **Linux / macOS (Bash):**
 
 ```bash
@@ -98,6 +106,27 @@ chmod +x install.sh
 ```
 
 Restart your terminal after installation.
+
+#### Non-interactive install
+
+All three installers accept flags for scripting/CI:
+
+```bash
+./install.sh --yes --profile ~/.bashrc --type function        # Bash
+powershell -File install.ps1 -Yes -ProfilePath $PROFILE        # PowerShell
+```
+
+| Flag | install.sh | install.ps1 / install-gui.ps1 | Meaning |
+|------|-----------|-------------------------------|---------|
+| Help | `--help` | `-Help` | Show help |
+| Check | `--check` | `-Check` | Show detection status, no changes |
+| Non-interactive | `--yes` | `-Yes` | Accept defaults, no prompts |
+| Profile | `--profile PATH` | `-ProfilePath PATH` | Profile file to modify |
+| Integration | `--type function\|bin` | `-Type function\|bin` | `function` (in profile) or `bin` (wrapper in bin dir) |
+| Bin directory | `--bin-dir PATH` | `-BinDir PATH` | Only for `bin` type |
+| Uninstall | `--uninstall` | `-Uninstall` | Remove GitWhisper from the profile |
+
+The interactive installers offer a menu with: install/reinstall, change install options (profile, integration type, bin directory), set up a project (hooks + `.gitwhisperconfig`), uninstall, and quit.
 
 ### 2. Use in any project
 
@@ -482,8 +511,9 @@ gitwhisper release --dry-run     # preview without changing anything
 GitWhisper/
 ├── gitwhisper.ps1          # Unified script (Windows PowerShell)
 ├── gitwhisper.sh           # Unified script (Linux/macOS Bash)
-├── install.ps1             # Global install for PowerShell
-├── install.sh              # Global install for Bash/Zsh
+├── install.ps1             # Global install for PowerShell (interactive wizard)
+├── install-gui.ps1         # Global install for PowerShell (WPF GUI + visualizer)
+├── install.sh              # Global install for Bash/Zsh (interactive wizard)
 ├── CHANGELOG.md            # Auto-generated changelog
 ├── LICENSE                 # MIT license
 ├── logo.png                # Project logo
