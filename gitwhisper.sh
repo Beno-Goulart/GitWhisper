@@ -21,6 +21,9 @@ show_help() {
     echo "    gitwhisper pr            - generate PR description"
     echo "    gitwhisper pr --base main   - specify base branch"
     echo "    gitwhisper --dry-run     - show message without committing"
+    echo "    gitwhisper init           - create config + install smart git hooks"
+    echo "    gitwhisper init --force   - recreate config + overwrite hooks"
+    echo "    gitwhisper suggest        - print suggested message (used by hooks)"
     echo ""
     exit 0
 }
@@ -168,48 +171,123 @@ remove_literal_strings() {
     perl -pe $'s/"[^"]*"/""/g; s/\x27[^\x27]*\x27/\x27\x27/g' <<< "$1"
 }
 
-invoke_commit() {
-    UNSTAGED=$(git diff --name-only)
-    UNTRACKED=$(git ls-files --others --exclude-standard)
+contains_pattern() {
+    local arr=("$@")
+    local pattern="${arr[-1]}"
+    unset 'arr[-1]'
+    for item in "${arr[@]}"; do
+        if [[ "$item" =~ $pattern ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
-    if [[ -n "$UNSTAGED" || -n "$UNTRACKED" ]]; then
-        echo ""
-        echo -e "  \033[33mUnstaged changes detected.\033[0m"
-        read -p "  Stage all changes? (y/n): " STAGE_ALL
-        if [[ "$STAGE_ALL" == "y" || "$STAGE_ALL" == "Y" ]]; then
-            git add -A
-            echo -e "  \033[32mAll changes staged.\033[0m"
+count_matches() {
+    local arr=("$@")
+    local pattern="${arr[-1]}"
+    unset 'arr[-1]'
+    local count=0
+    for item in "${arr[@]}"; do
+        if [[ "$item" =~ $pattern ]]; then
+            ((count+=1))
+        fi
+    done
+    echo "$count"
+}
+
+get_scope() {
+    local files=("$@")
+    [[ ${#files[@]} -eq 0 ]] && return
+
+    declare -A dir_counts
+    for f in "${files[@]}"; do
+        dir=$(dirname "$f")
+        if [[ "$dir" != "." ]]; then
+            top_dir=$(echo "$dir" | cut -d'/' -f1)
+            dir_counts[$top_dir]=$(( ${dir_counts[$top_dir]:-0} + 1 ))
+        fi
+    done
+
+    local num_dirs=${#dir_counts[@]}
+    if [[ $num_dirs -eq 1 ]]; then
+        echo "${!dir_counts[@]}"
+        return
+    fi
+
+    if [[ $num_dirs -gt 1 ]]; then
+        local max_count=0
+        local max_dir=""
+        for dir in "${!dir_counts[@]}"; do
+            if [[ ${dir_counts[$dir]} -gt $max_count ]]; then
+                max_count=${dir_counts[$dir]}
+                max_dir=$dir
+            fi
+        done
+        local threshold=$((${#files[@]} * 60 / 100))
+        if [[ $max_count -ge $threshold ]]; then
+            echo "$max_dir"
+            return
         fi
     fi
 
-    DIFF_INDEX=$(git diff --staged --name-status)
-    DIFF_STAT=$(git diff --staged --stat)
-    DIFF_CONTENT=$(git diff --staged)
-
-    if [[ -z "$DIFF_INDEX" ]]; then
-        echo -e "\033[33mNo changes found.\033[0m"
-        exit 0
+    if [[ ${#files[@]} -eq 1 ]]; then
+        basename "${files[0]}" | sed 's/\.[^.]*$//'
+        return
     fi
+}
 
-    echo -e "\n\033[36m=== Changes detected ===\033[0m"
-    echo "$DIFF_STAT"
-    echo ""
+get_branch_scope() {
+    local branch
+    branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+    [[ -z "$branch" ]] && return
 
-    ADDED=()
-    MODIFIED=()
-    DELETED=()
-    RENAMED=()
+    local ignored=("main" "master" "develop" "dev" "staging" "production" "release")
+    for i in "${ignored[@]}"; do
+        [[ "$branch" == "$i" ]] && return
+    done
 
-    while IFS=$'\t' read -r status file; do
-        status=$(echo "$status" | tr -d '[:space:]')
-        case "$status" in
-            A*)  ADDED+=("$file") ;;
-            M*)  MODIFIED+=("$file") ;;
-            D*)  DELETED+=("$file") ;;
-            R*)  RENAMED+=("$file") ;;
-        esac
-    done <<< "$DIFF_INDEX"
+    if [[ "$branch" =~ /(.+) ]]; then
+        local scope="${BASH_REMATCH[1]}"
+        local prefixes=("feature/" "bugfix/" "hotfix/" "fix/" "chore/" "docs/" "test/" "refactor/" "perf/" "release/")
+        for p in "${prefixes[@]}"; do
+            if [[ "$scope" =~ ^${p}(.+)$ ]]; then
+                scope="${BASH_REMATCH[1]}"
+                break
+            fi
+        done
+        echo "$scope"
+    fi
+}
 
+is_test_file() {
+    [[ "$1" =~ (test|spec|\.test\.|\.spec\.) ]]
+}
+
+is_config_file() {
+    [[ "$1" =~ (package\.json|package-lock\.json|yarn\.lock|pnpm-lock|tsconfig|jsconfig|webpack|vite\.config|rollup\.config|\.eslintrc|eslint\.config|\.prettierrc|prettier\.config|jest\.config|vitest\.config|babel\.config|\.babelrc|dockerfile|docker-compose|\.dockerignore|makefile|cmake|meson\.build|\.gitignore|\.editorconfig|\.env|turbo\.json|nx\.json|lerna\.json|pnpm-workspace|commitlint|husky|lint-staged|renovate|dependabot|\.github|netlify|vercel|firebase|railway|render) ]]
+}
+
+is_ci_file() {
+    [[ "$1" =~ (\.github/workflows|\.gitlab-ci|\.circleci|\.travis|jenkins|azure-pipelines|bitbucket-pipelines) ]]
+}
+
+is_doc_file() {
+    [[ "$1" =~ (readme|changelog|contributing|license|authors|docs/|\.md$|\.mdx$|\.rst$|\.txt$) ]]
+}
+
+is_style_file() {
+    [[ "$1" =~ (\.css$|\.scss$|\.less$|\.sass$|\.stylus$|\.prettierrc|\.stylelintrc|stylelint) ]]
+}
+
+is_db_file() {
+    [[ "$1" =~ (migration|migrate|schema|\.sql$|knex|prisma|sequelize|typeorm|drizzle) ]]
+}
+
+# Builds the message from globals ADDED, MODIFIED, DELETED and DIFF_CONTENT.
+# Sets globals: SELF_SCRIPT, SPECIFIC_DESC, COMMIT_TYPE, COMMIT_DESC, SCOPE,
+# SIMPLE_WITH_EMOJI, SIMPLE_WITHOUT, DETAIL_WITH_EMOJI, DETAIL_WITHOUT, BODY_PARTS.
+prepare_message() {
     ALL_FILES=("${ADDED[@]}" "${MODIFIED[@]}")
     ALL_CHANGED=("${ADDED[@]}" "${MODIFIED[@]}" "${DELETED[@]}")
 
@@ -230,119 +308,6 @@ invoke_commit() {
             break
         fi
     done
-
-    contains_pattern() {
-        local arr=("$@")
-        local pattern="${arr[-1]}"
-        unset 'arr[-1]'
-        for item in "${arr[@]}"; do
-            if [[ "$item" =~ $pattern ]]; then
-                return 0
-            fi
-        done
-        return 1
-    }
-
-    count_matches() {
-        local arr=("$@")
-        local pattern="${arr[-1]}"
-        unset 'arr[-1]'
-        local count=0
-        for item in "${arr[@]}"; do
-            if [[ "$item" =~ $pattern ]]; then
-                ((count+=1))
-            fi
-        done
-        echo "$count"
-    }
-
-    get_scope() {
-        local files=("$@")
-        [[ ${#files[@]} -eq 0 ]] && return
-
-        declare -A dir_counts
-        for f in "${files[@]}"; do
-            dir=$(dirname "$f")
-            if [[ "$dir" != "." ]]; then
-                top_dir=$(echo "$dir" | cut -d'/' -f1)
-                dir_counts[$top_dir]=$(( ${dir_counts[$top_dir]:-0} + 1 ))
-            fi
-        done
-
-        local num_dirs=${#dir_counts[@]}
-        if [[ $num_dirs -eq 1 ]]; then
-            echo "${!dir_counts[@]}"
-            return
-        fi
-
-        if [[ $num_dirs -gt 1 ]]; then
-            local max_count=0
-            local max_dir=""
-            for dir in "${!dir_counts[@]}"; do
-                if [[ ${dir_counts[$dir]} -gt $max_count ]]; then
-                    max_count=${dir_counts[$dir]}
-                    max_dir=$dir
-                fi
-            done
-            local threshold=$((${#files[@]} * 60 / 100))
-            if [[ $max_count -ge $threshold ]]; then
-                echo "$max_dir"
-                return
-            fi
-        fi
-
-        if [[ ${#files[@]} -eq 1 ]]; then
-            basename "${files[0]}" | sed 's/\.[^.]*$//'
-            return
-        fi
-    }
-
-    get_branch_scope() {
-        local branch
-        branch=$(git symbolic-ref --short HEAD 2>/dev/null)
-        [[ -z "$branch" ]] && return
-
-        local ignored=("main" "master" "develop" "dev" "staging" "production" "release")
-        for i in "${ignored[@]}"; do
-            [[ "$branch" == "$i" ]] && return
-        done
-
-        if [[ "$branch" =~ /(.+) ]]; then
-            local scope="${BASH_REMATCH[1]}"
-            local prefixes=("feature/" "bugfix/" "hotfix/" "fix/" "chore/" "docs/" "test/" "refactor/" "perf/" "release/")
-            for p in "${prefixes[@]}"; do
-                if [[ "$scope" =~ ^${p}(.+)$ ]]; then
-                    scope="${BASH_REMATCH[1]}"
-                    break
-                fi
-            done
-            echo "$scope"
-        fi
-    }
-
-    is_test_file() {
-        [[ "$1" =~ (test|spec|\.test\.|\.spec\.) ]]
-    }
-
-    is_config_file() {
-        [[ "$1" =~ (package\.json|package-lock\.json|yarn\.lock|pnpm-lock|tsconfig|jsconfig|webpack|vite\.config|rollup\.config|\.eslintrc|eslint\.config|\.prettierrc|prettier\.config|jest\.config|vitest\.config|babel\.config|\.babelrc|dockerfile|docker-compose|\.dockerignore|makefile|cmake|meson\.build|\.gitignore|\.editorconfig|\.env|turbo\.json|nx\.json|lerna\.json|pnpm-workspace|commitlint|husky|lint-staged|renovate|dependabot|\.github|netlify|vercel|firebase|railway|render) ]]
-    }
-
-    is_ci_file() {
-        [[ "$1" =~ (\.github/workflows|\.gitlab-ci|\.circleci|\.travis|jenkins|azure-pipelines|bitbucket-pipelines) ]]
-    }
-
-    is_doc_file() {
-        [[ "$1" =~ (readme|changelog|contributing|license|authors|docs/|\.md$|\.mdx$|\.rst$|\.txt$) ]]
-    }
-
-    is_style_file() {
-        [[ "$1" =~ (\.css$|\.scss$|\.less$|\.sass$|\.stylus$|\.prettierrc|\.stylelintrc|stylelint) ]]
-    }
-
-    is_db_file() {
-        [[ "$1" =~ (migration|migrate|schema|\.sql$|knex|prisma|sequelize|typeorm|drizzle) ]]
-    }
 
     ADDED_LINES=$(echo "$DIFF_CONTENT" | grep -E '^\+[^+]' || true)
     REMOVED_LINES=$(echo "$DIFF_CONTENT" | grep -E '^-[^-]' || true)
@@ -611,6 +576,315 @@ invoke_commit() {
         DETAIL_WITHOUT="$SIMPLE_WITHOUT"
     fi
 
+    BODY_PARTS=()
+    if [[ ${#ADDED[@]} -gt 0 ]]; then
+        BODY_PARTS+=("Added:")
+        for f in "${ADDED[@]}"; do
+            BODY_PARTS+=("  - $f")
+        done
+    fi
+    if [[ ${#MODIFIED[@]} -gt 0 ]]; then
+        BODY_PARTS+=("Modified:")
+        for f in "${MODIFIED[@]}"; do
+            BODY_PARTS+=("  - $f")
+        done
+    fi
+    if [[ ${#DELETED[@]} -gt 0 ]]; then
+        BODY_PARTS+=("Removed:")
+        for f in "${DELETED[@]}"; do
+            BODY_PARTS+=("  - $f")
+        done
+    fi
+    BODY_PARTS+=("")
+    BODY_PARTS+=("Change summary: $COMMIT_DESC")
+    if [[ -n "$SPECIFIC_DESC" && "$SPECIFIC_DESC" != "$COMMIT_DESC" ]]; then
+        BODY_PARTS+=("Details: $SPECIFIC_DESC")
+    fi
+}
+
+load_gw_config() {
+    GW_CONFIG=()
+    [[ -f ".gitwhisperconfig" ]] || return
+    local section="" raw key val
+    while IFS= read -r raw; do
+        raw=$(echo "$raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [[ -z "$raw" ]] && continue
+        [[ "$raw" == \#* || "$raw" == \;* ]] && continue
+        if [[ "$raw" =~ ^\[(.+)\]$ ]]; then
+            section="${BASH_REMATCH[1]}"
+            section=$(echo "$section" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            continue
+        fi
+        if [[ "$raw" =~ ^([^=]+)=(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+            val="${BASH_REMATCH[2]}"
+            val=$(echo "$val" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            GW_CONFIG["${section}.${key}"]="$val"
+        fi
+    done < ".gitwhisperconfig"
+}
+
+invoke_suggest() {
+    if git diff --cached --quiet 2>/dev/null; then
+        exit 0
+    fi
+
+    DIFF_INDEX=$(git diff --staged --name-status)
+    DIFF_CONTENT=$(git diff --staged)
+
+    ADDED=()
+    MODIFIED=()
+    DELETED=()
+    while IFS=$'\t' read -r status file; do
+        [[ -z "$status" && -z "$file" ]] && continue
+        status=$(echo "$status" | tr -d '[:space:]')
+        case "$status" in
+            A*)  ADDED+=("$file") ;;
+            M*)  MODIFIED+=("$file") ;;
+            D*)  DELETED+=("$file") ;;
+        esac
+    done <<< "$DIFF_INDEX"
+
+    prepare_message
+
+    local default=1
+    [[ -n "${GW_CONFIG[general.default]}" ]] && default="${GW_CONFIG[general.default]}"
+    if [[ ! "$default" =~ ^[1-4]$ ]]; then default=1; fi
+
+    local emoji_on=true
+    [[ "${GW_CONFIG[general.emoji]}" == "false" ]] && emoji_on=false
+
+    local title
+    case "$default" in
+        1) if [[ "$emoji_on" == true ]]; then title="$SIMPLE_WITH_EMOJI"; else title="$SIMPLE_WITHOUT"; fi ;;
+        2) title="$SIMPLE_WITHOUT" ;;
+        3) if [[ "$emoji_on" == true ]]; then title="$DETAIL_WITH_EMOJI"; else title="$DETAIL_WITHOUT"; fi ;;
+        4) title="$DETAIL_WITHOUT" ;;
+    esac
+
+    printf '%s\n\n%s\n' "$title" "$(printf '%s\n' "${BODY_PARTS[@]}")"
+    exit 0
+}
+
+new_gw_config_file() {
+    cat > .gitwhisperconfig <<'EOF'
+# GitWhisper configuration
+# Created by `gitwhisper init`. Re-run `gitwhisper init` to update hooks after edits.
+
+[general]
+# include emoji in generated commit messages (true/false)
+emoji = true
+
+# suggestion pre-filled by the hook: 1=simple+emoji, 2=simple, 3=detailed+emoji, 4=detailed
+default = 1
+
+# maintainers excluded from the "community contributors" section of the changelog
+core_maintainers =
+
+[hooks]
+# pre-fill the commit message on `git commit` (true/false)
+prepare = true
+
+# reject commits that do not follow Conventional Commits (true/false)
+validate = true
+EOF
+    echo -e "  \033[32mCreated .gitwhisperconfig\033[0m"
+}
+
+get_gitwhisper_command() {
+    if [[ "$0" == */* ]]; then
+        local abs
+        abs=$(cd "$(dirname "$0")" && pwd)
+        echo "bash '$abs/$(basename "$0")'"
+    else
+        echo "gitwhisper"
+    fi
+}
+
+get_prepare_hook_content() {
+    local cmd="$1"
+    cat <<EOF
+#!/bin/sh
+# Generated by GitWhisper init. Re-run \`gitwhisper init\` to update.
+GW_CMD="$cmd"
+
+MSG_FILE="\$1"
+SOURCE="\$2"
+
+# only pre-fill plain commits (skip -m, --amend, merge, template, etc.)
+case "\$SOURCE" in
+    message|template|merge|squash|commit) exit 0 ;;
+esac
+
+# do nothing when there are no staged changes
+if ! git diff --cached --quiet 2>/dev/null; then
+    SUGGEST=\$(eval "\$GW_CMD suggest < /dev/null" 2>/dev/null)
+    if [ -n "\$SUGGEST" ]; then
+        # only pre-fill when the message file has no real content yet
+        REAL=\$(grep -v '^#' "\$MSG_FILE" | grep -v '^[[:space:]]*\$' | head -1)
+        if [ -z "\$REAL" ]; then
+            printf '%s\n' "\$SUGGEST" > "\$MSG_FILE"
+        fi
+    fi
+fi
+
+exit 0
+EOF
+}
+
+get_commit_msg_hook_content() {
+    cat <<'EOF'
+#!/bin/sh
+# Generated by GitWhisper init. Re-run `gitwhisper init` to update.
+MSG_FILE="$1"
+
+FIRST_LINE=""
+while IFS= read -r line; do
+    case "$line" in
+        \#*) continue ;;
+        "") continue ;;
+    esac
+    FIRST_LINE="$line"
+    break
+done < "$MSG_FILE"
+
+if ! echo "$FIRST_LINE" | grep -qE '^[^[:alnum:]]*(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|db)(\([^)]*\))?(!)?: .+'; then
+    echo ""
+    echo "GitWhisper: commit message does not follow Conventional Commits."
+    echo ""
+    echo "  Expected: <type>(<scope>): <description>"
+    echo "  Example:  feat(api): add login endpoint"
+    echo ""
+    echo "  Run 'gitwhisper' to generate a message, or edit the subject line."
+    echo ""
+    exit 1
+fi
+
+exit 0
+EOF
+}
+
+install_hook() {
+    local path="$1" content="$2" force="${3:-0}"
+
+    if [[ -f "$path" ]]; then
+        local existing
+        existing=$(cat "$path" 2>/dev/null)
+        if [[ -n "$existing" && "$existing" != *"GitWhisper"* ]]; then
+            if [[ "$force" != "1" ]]; then
+                echo ""
+                read -p "  $(basename "$path") exists and is not from GitWhisper. Back up and overwrite? (y/n): " answer
+                if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+                    echo -e "  \033[33mSkipping $(basename "$path").\033[0m"
+                    return
+                fi
+            fi
+            cp "$path" "$path.bak"
+            echo -e "  \033[33mBacked up existing hook to $path.bak\033[0m"
+        fi
+    fi
+    printf '%s\n' "$content" > "$path"
+    echo -e "  \033[32mInstalled $(basename "$path")\033[0m"
+}
+
+invoke_init() {
+    local force=false
+    for a in "$@"; do
+        [[ "$a" == "--force" || "$a" == "-Force" ]] && force=true
+    done
+
+    echo ""
+    echo -e "\033[36m=== GitWhisper init ===\033[0m"
+    echo ""
+
+    if [[ -f ".gitwhisperconfig" ]]; then
+        if [[ "$force" == true ]]; then
+            echo -e "  \033[33m.gitwhisperconfig already exists. Recreating.\033[0m"
+            new_gw_config_file
+        else
+            echo -e "  \033[32m.gitwhisperconfig already exists. Keeping it.\033[0m"
+        fi
+    else
+        new_gw_config_file
+    fi
+
+    local hooks_dir=".git/hooks"
+    if [[ ! -d "$hooks_dir" ]]; then
+        echo ""
+        echo -e "  \033[31mError: could not find $hooks_dir.\033[0m"
+        exit 1
+    fi
+
+    local gw_cmd f=0
+    gw_cmd=$(get_gitwhisper_command)
+    [[ "$force" == true ]] && f=1
+
+    if [[ "${GW_CONFIG[hooks.prepare]}" == "false" ]]; then
+        rm -f "$hooks_dir/prepare-commit-msg"
+        echo -e "  \033[33mprepare-commit-msg disabled in config. Removed.\033[0m"
+    else
+        install_hook "$hooks_dir/prepare-commit-msg" "$(get_prepare_hook_content "$gw_cmd")" "$f"
+    fi
+
+    if [[ "${GW_CONFIG[hooks.validate]}" == "false" ]]; then
+        rm -f "$hooks_dir/commit-msg"
+        echo -e "  \033[33mcommit-msg disabled in config. Removed.\033[0m"
+    else
+        install_hook "$hooks_dir/commit-msg" "$(get_commit_msg_hook_content)" "$f"
+    fi
+
+    echo ""
+    echo -e "  \033[32mDone! GitWhisper hooks installed.\033[0m"
+    echo -e "  Next 'git commit' will pre-fill a suggested message."
+    echo -e "  Config file: .gitwhisperconfig"
+    echo ""
+}
+
+invoke_commit() {
+    UNSTAGED=$(git diff --name-only)
+    UNTRACKED=$(git ls-files --others --exclude-standard)
+
+    if [[ -n "$UNSTAGED" || -n "$UNTRACKED" ]]; then
+        echo ""
+        echo -e "  \033[33mUnstaged changes detected.\033[0m"
+        read -p "  Stage all changes? (y/n): " STAGE_ALL
+        if [[ "$STAGE_ALL" == "y" || "$STAGE_ALL" == "Y" ]]; then
+            git add -A
+            echo -e "  \033[32mAll changes staged.\033[0m"
+        fi
+    fi
+
+    DIFF_INDEX=$(git diff --staged --name-status)
+    DIFF_STAT=$(git diff --staged --stat)
+    DIFF_CONTENT=$(git diff --staged)
+
+    if [[ -z "$DIFF_INDEX" ]]; then
+        echo -e "\033[33mNo changes found.\033[0m"
+        exit 0
+    fi
+
+    echo -e "\n\033[36m=== Changes detected ===\033[0m"
+    echo "$DIFF_STAT"
+    echo ""
+
+    ADDED=()
+    MODIFIED=()
+    DELETED=()
+    RENAMED=()
+
+    while IFS=$'\t' read -r status file; do
+        status=$(echo "$status" | tr -d '[:space:]')
+        case "$status" in
+            A*)  ADDED+=("$file") ;;
+            M*)  MODIFIED+=("$file") ;;
+            D*)  DELETED+=("$file") ;;
+            R*)  RENAMED+=("$file") ;;
+        esac
+    done <<< "$DIFF_INDEX"
+
+    prepare_message
+
     echo ""
     echo -e "\033[32m=== Choose your commit message ===\033[0m"
     echo ""
@@ -638,30 +912,6 @@ invoke_commit() {
     echo ""
     echo -e "  \033[36mCommitting: $SELECTED_MSG\033[0m"
 
-    BODY_PARTS=()
-    if [[ ${#ADDED[@]} -gt 0 ]]; then
-        BODY_PARTS+=("Added:")
-        for f in "${ADDED[@]}"; do
-            BODY_PARTS+=("  - $f")
-        done
-    fi
-    if [[ ${#MODIFIED[@]} -gt 0 ]]; then
-        BODY_PARTS+=("Modified:")
-        for f in "${MODIFIED[@]}"; do
-            BODY_PARTS+=("  - $f")
-        done
-    fi
-    if [[ ${#DELETED[@]} -gt 0 ]]; then
-        BODY_PARTS+=("Removed:")
-        for f in "${DELETED[@]}"; do
-            BODY_PARTS+=("  - $f")
-        done
-    fi
-    BODY_PARTS+=("")
-    BODY_PARTS+=("Change summary: $COMMIT_DESC")
-    if [[ -n "$SPECIFIC_DESC" && "$SPECIFIC_DESC" != "$COMMIT_DESC" ]]; then
-        BODY_PARTS+=("Details: $SPECIFIC_DESC")
-    fi
 
     if [[ "$DRY_RUN" == true ]]; then
         echo -e "  \033[90m[DRY-RUN] Commit skipped.\033[0m"
@@ -1465,6 +1715,19 @@ invoke_release() {
     fi
 }
 
+declare -A GW_CONFIG
+
+load_gw_config
+
+if [[ -n "${GW_CONFIG[general.core_maintainers]}" ]]; then
+    IFS=',' read -ra _maint <<< "${GW_CONFIG[general.core_maintainers]}"
+    CORE_MAINTAINERS=()
+    for _u in "${_maint[@]}"; do
+        _u=$(echo "$_u" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [[ -n "$_u" ]] && CORE_MAINTAINERS+=("$_u")
+    done
+fi
+
 case "$CMD" in
     ""|commit)
         invoke_commit
@@ -1483,6 +1746,12 @@ case "$CMD" in
         ;;
     release)
         invoke_release "$@"
+        ;;
+    init)
+        invoke_init "$@"
+        ;;
+    suggest)
+        invoke_suggest
         ;;
     *)
         echo "Unknown command: $CMD"

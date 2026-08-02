@@ -39,6 +39,9 @@ function Show-Help {
     Write-Host "    gitwhisper pr            - generate PR description" -ForegroundColor Cyan
     Write-Host "    gitwhisper pr --base main   - specify base branch" -ForegroundColor Cyan
     Write-Host "    gitwhisper pr create        - generate and create PR" -ForegroundColor Cyan
+    Write-Host "    gitwhisper init         - create .gitwhisperconfig and install git hooks" -ForegroundColor Cyan
+    Write-Host "    gitwhisper init --force - overwrite existing config and hooks" -ForegroundColor Cyan
+    Write-Host "    gitwhisper suggest      - print suggested message (used by hooks)" -ForegroundColor Cyan
     Write-Host "    gitwhisper --dry-run     - show message without committing" -ForegroundColor Cyan
     Write-Host ""
     exit 0
@@ -68,6 +71,28 @@ if ($Help -or $Command -eq "help" -or $Command -eq "--help" -or $Command -eq "-h
 if (-not (Test-Path ".git")) {
     Write-Host "Error: Not a git repository." -ForegroundColor Red
     exit 1
+}
+
+function Get-GwConfig {
+    $cfg = @{}
+    if (-not (Test-Path ".gitwhisperconfig")) { return $cfg }
+    $section = ""
+    foreach ($raw in Get-Content ".gitwhisperconfig") {
+        $line = $raw.Trim()
+        if (-not $line -or $line.StartsWith("#") -or $line.StartsWith(";")) { continue }
+        if ($line -match "^\[(.+)\]$") { $section = $Matches[1].Trim(); continue }
+        if ($line -match "^([^=]+)=(.*)$") {
+            $key = $Matches[1].Trim().ToLower()
+            $val = $Matches[2].Trim()
+            $cfg["$section.$key"] = $val
+        }
+    }
+    return $cfg
+}
+
+$gwConfig = Get-GwConfig
+if ($gwConfig["general.core_maintainers"]) {
+    $script:coreMaintainers = @($gwConfig["general.core_maintainers"] -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
 function Invoke-Undo {
@@ -1651,6 +1676,416 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
     }
 }
 
+function Get-SuggestedMessage {
+    param(
+        [string]$DiffContent,
+        [string[]]$Added,
+        [string[]]$Modified,
+        [string[]]$Deleted
+    )
+
+    $allFiles = $Added + $Modified
+    $selfScript = $allFiles | Where-Object { $_ -match "gitwhisper|^install\.(ps1|sh)$" }
+
+    $scope = Get-Scope -Files $allFiles
+    if (-not $scope) { $scope = Get-BranchScope }
+
+    $result = Get-CommitType -Added $Added -Modified $Modified -Deleted $Deleted `
+        -AddedLower ($allFiles | ForEach-Object { $_.ToLower() }) `
+        -ModifiedLower ($Modified | ForEach-Object { $_.ToLower() }) `
+        -DeletedLower ($Deleted | ForEach-Object { $_.ToLower() }) `
+        -DiffContent $DiffContent -SelfScript:($selfScript.Count -gt 0)
+
+    $type = $result.Type
+    $desc = $result.Desc
+
+    $addedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^\+[^+]" }) -join "`n"
+    $removedLines = ($DiffContent -split "`n" | Where-Object { $_ -match "^-[^-]" }) -join "`n"
+
+    if ($selfScript.Count -gt 0) {
+        $addedLines   = Remove-LiteralStrings -Content $addedLines
+        $removedLines = Remove-LiteralStrings -Content $removedLines
+    }
+
+    $detailParts = @()
+
+    $newParams = [regex]::Matches($addedLines, 'param\(\s*\[.*?\]\s*\$+(\w+)')
+    if ($newParams.Count -gt 0) {
+        $names = ($newParams | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+        $detailParts += "adds -$names parameter"
+    }
+
+    $newBashFlags = [regex]::Matches($addedLines, '"--?(\w+)"')
+    if ($newBashFlags.Count -gt 0) {
+        $names = ($newBashFlags | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(y|n|yes|no)$" } | Select-Object -Unique) -join ", "
+        if ($names) { $detailParts += "adds --$names flag" }
+    }
+
+    $addedFuncs = [regex]::Matches($addedLines, 'function\s+([\w-]+)\s*\{')
+    if ($addedFuncs.Count -gt 0) {
+        $names = ($addedFuncs | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        if ($names) { $detailParts += "adds $names function" }
+    }
+
+    $addedBashFuncs = [regex]::Matches($addedLines, '([\w_]+)\s*\(\)\s*\{')
+    if ($addedBashFuncs.Count -gt 0) {
+        $names = ($addedBashFuncs | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(contains_pattern|count_matches)$" } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        if ($names) { $detailParts += "adds $names function" }
+    }
+
+    $hasHighPriority = $detailParts.Count -ge 2
+
+    if (-not $hasHighPriority) {
+        $gitOps = [regex]::Matches($addedLines, 'git\s+(reset|commit|push|pull|merge|rebase|stash|tag|branch|checkout|diff|log|status|add|rm|mv)')
+        if ($gitOps.Count -gt 0) {
+            $ops = ($gitOps | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+            $detailParts += "adds git $ops"
+        }
+    }
+
+    if (-not $hasHighPriority) {
+        $writeHost = [regex]::Matches($addedLines, 'Write-Host\s+"([^"]{5,50})"')
+        if ($writeHost.Count -gt 0) {
+            $msgs = ($writeHost | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch "^(Error|Warning|Pushing|Committing|Select|Cancel)" } | ForEach-Object { $_ -replace '\s+', ' ' } | Select-Object -Unique | Select-Object -First 2) -join ", "
+            if ($msgs) { $detailParts += "adds $msgs messages" }
+        }
+    }
+
+    $addedImports = [regex]::Matches($addedLines, "(?:import|require)\s*\{?\s*([\w]+)")
+    if ($addedImports.Count -gt 0) {
+        $names = ($addedImports | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        $detailParts += "adds $names import"
+    }
+
+    $addedClasses = [regex]::Matches($addedLines, "(?:class)\s+(\w+)")
+    if ($addedClasses.Count -gt 0) {
+        $names = ($addedClasses | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+        $detailParts += "adds $names class"
+    }
+
+    $addedRoutes = [regex]::Matches($addedLines, "(?:router|Route|path)\s*\(\s*['""]([^'""]+)")
+    if ($addedRoutes.Count -gt 0) {
+        $paths = ($addedRoutes | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join ", "
+        $detailParts += "adds $paths route"
+    }
+
+    $addedHooks = [regex]::Matches($addedLines, "(useState|useEffect|useContext|useReducer|useMemo|useCallback|useRef)\s*\(")
+    if ($addedHooks.Count -gt 0) {
+        $hookNames = ($addedLines | Select-String -Pattern "(\w+)\s*\(" | ForEach-Object { $_.Matches[0].Groups[1].Value } | Where-Object { $_ -match "^use" } | Select-Object -Unique | Select-Object -First 3) -join ", "
+        if ($hookNames) { $detailParts += "adds $hookNames" }
+    }
+
+    if ($detailParts.Count -eq 0) {
+        $scriptFiles = @()
+        $docFiles = @()
+        $configFiles = @()
+        $otherFiles = @()
+
+        foreach ($f in ($Added + $Modified)) {
+            $ext = [System.IO.Path]::GetExtension($f).ToLower()
+            $name = [System.IO.Path]::GetFileName($f).ToLower()
+            if ($ext -match "\.(ps1|sh|py|rb|js|ts)$" -or $name -match "commit-msg|changelog") {
+                $scriptFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+            }
+            elseif ($ext -match "\.(md|mdx|rst|txt)$" -or $name -match "readme|changelog|contributing|license") {
+                $docFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+            }
+            elseif ($name -match "(package\.json|dockerfile|makefile|\.gitignore|\.editorconfig|tsconfig)") {
+                $configFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+            }
+            else {
+                $otherFiles += [System.IO.Path]::GetFileNameWithoutExtension($f)
+            }
+        }
+
+        $mixParts = @()
+        if ($scriptFiles.Count -gt 0) { $mixParts += "scripts ($($scriptFiles -join ', '))" }
+        if ($docFiles.Count -gt 0) { $mixParts += "docs ($($docFiles -join ', '))" }
+        if ($configFiles.Count -gt 0) { $mixParts += "config ($($configFiles -join ', '))" }
+        if ($otherFiles.Count -gt 0) { $mixParts += ($otherFiles | Select-Object -First 3) -join ", " }
+
+        if ($mixParts.Count -gt 0) {
+            $detailParts += "updates $($mixParts -join ' and ')"
+        }
+        elseif ($Deleted.Count -gt 0) {
+            $delNames = ($Deleted | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Select-Object -First 2) -join ", "
+            $detailParts += "removes $delNames"
+        }
+    }
+
+    $detailDesc = ($detailParts | Select-Object -First 2 | ForEach-Object { $_ -replace '\s{2,}', ' ' } | Select-Object -Unique) -join " and "
+
+    $gitmoji = @{}
+    $gitmoji["feat"]     = [char]::ConvertFromUtf32(0x2728)
+    $gitmoji["fix"]      = [char]::ConvertFromUtf32(0x1F41B)
+    $gitmoji["docs"]     = [char]::ConvertFromUtf32(0x1F4DD)
+    $gitmoji["style"]    = [char]::ConvertFromUtf32(0x1F484)
+    $gitmoji["refactor"] = [char]::ConvertFromUtf32(0x267B)
+    $gitmoji["perf"]     = [char]::ConvertFromUtf32(0x26A1)
+    $gitmoji["test"]     = [char]::ConvertFromUtf32(0x2705)
+    $gitmoji["build"]    = [char]::ConvertFromUtf32(0x1F527)
+    $gitmoji["ci"]       = [char]::ConvertFromUtf32(0x1F477)
+    $gitmoji["chore"]    = [char]::ConvertFromUtf32(0x1F528)
+    $gitmoji["revert"]   = [char]::ConvertFromUtf32(0x23EA)
+
+    $emoji = $gitmoji[$type]
+
+    if ($scope) {
+        $simpleWithEmoji    = "$emoji ${type}(${scope}): $desc"
+        $simpleWithoutEmoji = "${type}(${scope}): $desc"
+        $detailWithEmoji    = "$emoji ${type}(${scope}): $detailDesc"
+        $detailWithoutEmoji = "${type}(${scope}): $detailDesc"
+    } else {
+        $simpleWithEmoji    = "$emoji ${type}: $desc"
+        $simpleWithoutEmoji = "${type}: $desc"
+        $detailWithEmoji    = "$emoji ${type}: $detailDesc"
+        $detailWithoutEmoji = "${type}: $detailDesc"
+    }
+
+    $default = 1
+    if ($gwConfig["general.default"]) {
+        try { $default = [int]$gwConfig["general.default"] } catch { $default = 1 }
+    }
+    if ($default -lt 1 -or $default -gt 4) { $default = 1 }
+
+    $emojiOn = $true
+    if ($gwConfig["general.emoji"] -eq "false") { $emojiOn = $false }
+
+    $title = switch ($default) {
+        1 { if ($emojiOn) { $simpleWithEmoji } else { $simpleWithoutEmoji } }
+        2 { $simpleWithoutEmoji }
+        3 { if ($emojiOn) { $detailWithEmoji } else { $detailWithoutEmoji } }
+        4 { $detailWithoutEmoji }
+    }
+
+    $bodyParts = @()
+    if ($Added.Count -gt 0) {
+        $bodyParts += "Added:"
+        $Added | ForEach-Object { $bodyParts += "  - $_" }
+    }
+    if ($Modified.Count -gt 0) {
+        $bodyParts += "Modified:"
+        $Modified | ForEach-Object { $bodyParts += "  - $_" }
+    }
+    if ($Deleted.Count -gt 0) {
+        $bodyParts += "Removed:"
+        $Deleted | ForEach-Object { $bodyParts += "  - $_" }
+    }
+    $bodyParts += ""
+    $bodyParts += "Change summary: $desc"
+    if ($detailDesc -and $detailDesc -ne $desc) {
+        $bodyParts += "Details: $detailDesc"
+    }
+
+    return "$title`n`n$($bodyParts -join "`n")"
+}
+
+function Invoke-Suggest {
+    $diffIndex = git diff --staged --name-status
+    if (-not $diffIndex) { exit 0 }
+    $diffContent = git diff --staged
+
+    $added = @()
+    $modified = @()
+    $deleted = @()
+
+    foreach ($line in ($diffIndex -split "`n")) {
+        if (-not $line) { continue }
+        $parts = $line -split "`t"
+        $status = $parts[0].Trim()
+        $file   = $parts[-1].Trim()
+        switch -Regex ($status) {
+            "^A"  { $added += $file }
+            "^M"  { $modified += $file }
+            "^D"  { $deleted += $file }
+        }
+    }
+
+    $msg = Get-SuggestedMessage -DiffContent $diffContent -Added $added -Modified $modified -Deleted $deleted
+    if ($msg) {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($msg)
+        $stdout = [System.Console]::OpenStandardOutput()
+        $stdout.Write($bytes, 0, $bytes.Length)
+        $stdout.Flush()
+        $stdout.Close()
+    }
+    exit 0
+}
+
+function New-GwConfigFile {
+    $content = @'
+# GitWhisper configuration
+# Created by `gitwhisper init`. Re-run `gitwhisper init` to update hooks after edits.
+
+[general]
+# include emoji in generated commit messages (true/false)
+emoji = true
+
+# suggestion pre-filled by the hook: 1=simple+emoji, 2=simple, 3=detailed+emoji, 4=detailed
+default = 1
+
+# maintainers excluded from the "community contributors" section of the changelog
+core_maintainers =
+
+[hooks]
+# pre-fill the commit message on `git commit` (true/false)
+prepare = true
+
+# reject commits that do not follow Conventional Commits (true/false)
+validate = true
+'@
+    $content | Out-File -FilePath ".gitwhisperconfig" -Encoding UTF8
+    Write-Host "  Created .gitwhisperconfig" -ForegroundColor Green
+}
+
+function Get-GitwhisperCommand {
+    $script = Join-Path $PSScriptRoot "gitwhisper.ps1"
+    if (Test-Path $script) {
+        return "powershell.exe -NoProfile -ExecutionPolicy Bypass -File '$($script.Replace('\', '/'))'"
+    }
+    return "gitwhisper"
+}
+
+function Get-PrepareHookContent {
+    param([string]$Cmd)
+
+    $tpl = @'
+#!/bin/sh
+# Generated by GitWhisper init. Re-run `gitwhisper init` to update.
+GW_CMD="__GW_CMD__"
+
+MSG_FILE="$1"
+SOURCE="$2"
+
+# only pre-fill plain commits (skip -m, --amend, merge, template, etc.)
+case "$SOURCE" in
+    message|template|merge|squash|commit) exit 0 ;;
+esac
+
+# do nothing when there are no staged changes
+if ! git diff --cached --quiet 2>/dev/null; then
+    SUGGEST=$(eval "$GW_CMD suggest < /dev/null" 2>/dev/null)
+    if [ -n "$SUGGEST" ]; then
+        # only pre-fill when the message file has no real content yet
+        REAL=$(grep -v '^#' "$MSG_FILE" | grep -v '^[[:space:]]*$' | head -1)
+        if [ -z "$REAL" ]; then
+            printf '%s\n' "$SUGGEST" > "$MSG_FILE"
+        fi
+    fi
+fi
+
+exit 0
+'@
+    return $tpl.Replace("__GW_CMD__", $Cmd)
+}
+
+function Get-CommitMsgHookContent {
+    $tpl = @'
+#!/bin/sh
+# Generated by GitWhisper init. Re-run `gitwhisper init` to update.
+MSG_FILE="$1"
+
+FIRST_LINE=""
+while IFS= read -r line; do
+    case "$line" in
+        \#*) continue ;;
+        "") continue ;;
+    esac
+    FIRST_LINE="$line"
+    break
+done < "$MSG_FILE"
+
+if ! echo "$FIRST_LINE" | grep -qE '^[^[:alnum:]]*(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|db)(\([^)]*\))?(!)?: .+'; then
+    echo ""
+    echo "GitWhisper: commit message does not follow Conventional Commits."
+    echo ""
+    echo "  Expected: <type>(<scope>): <description>"
+    echo "  Example:  feat(api): add login endpoint"
+    echo ""
+    echo "  Run 'gitwhisper' to generate a message, or edit the subject line."
+    echo ""
+    exit 1
+fi
+
+exit 0
+'@
+    return $tpl
+}
+
+function Install-Hook {
+    param(
+        [string]$Path,
+        [string]$Content,
+        [switch]$Force
+    )
+
+    if (Test-Path $Path) {
+        $existing = Get-Content $Path -Raw -ErrorAction SilentlyContinue
+        if ($existing -and $existing -notmatch "GitWhisper") {
+            if (-not $Force) {
+                Write-Host ""
+                $answer = Read-Host "  $(Split-Path $Path -Leaf) exists and is not from GitWhisper. Back up and overwrite? (y/n)"
+                if ($answer -ne "y" -and $answer -ne "Y") {
+                    Write-Host "  Skipping $(Split-Path $Path -Leaf)." -ForegroundColor Yellow
+                    return
+                }
+            }
+            Copy-Item $Path "$Path.bak" -Force
+            Write-Host "  Backed up existing hook to $Path.bak" -ForegroundColor Yellow
+        }
+    }
+    $Content | Out-File -FilePath $Path -Encoding ASCII -NoNewline
+    Write-Host "  Installed $(Split-Path $Path -Leaf)" -ForegroundColor Green
+}
+
+function Invoke-Init {
+    param([switch]$Force)
+
+    Write-Host ""
+    Write-Host "=== GitWhisper init ===" -ForegroundColor Cyan
+    Write-Host ""
+
+    if (Test-Path ".gitwhisperconfig") {
+        if ($Force) {
+            Write-Host "  .gitwhisperconfig already exists. Recreating." -ForegroundColor Yellow
+            New-GwConfigFile
+        } else {
+            Write-Host "  .gitwhisperconfig already exists. Keeping it." -ForegroundColor Green
+        }
+    } else {
+        New-GwConfigFile
+    }
+
+    $hooksDir = Join-Path ".git" "hooks"
+    if (-not (Test-Path $hooksDir)) {
+        Write-Host ""
+        Write-Host "  Error: could not find $hooksDir." -ForegroundColor Red
+        exit 1
+    }
+
+    $gwCmd = Get-GitwhisperCommand
+
+    if ($gwConfig["hooks.prepare"] -eq "false") {
+        Remove-Item (Join-Path $hooksDir "prepare-commit-msg") -Force -ErrorAction SilentlyContinue
+        Write-Host "  prepare-commit-msg disabled in config. Removed." -ForegroundColor Yellow
+    } else {
+        Install-Hook -Path (Join-Path $hooksDir "prepare-commit-msg") -Content (Get-PrepareHookContent -Cmd $gwCmd) -Force:$Force
+    }
+
+    if ($gwConfig["hooks.validate"] -eq "false") {
+        Remove-Item (Join-Path $hooksDir "commit-msg") -Force -ErrorAction SilentlyContinue
+        Write-Host "  commit-msg disabled in config. Removed." -ForegroundColor Yellow
+    } else {
+        Install-Hook -Path (Join-Path $hooksDir "commit-msg") -Content (Get-CommitMsgHookContent) -Force:$Force
+    }
+
+    Write-Host ""
+    Write-Host "  Done! GitWhisper hooks installed." -ForegroundColor Green
+    Write-Host "  Next 'git commit' will pre-fill a suggested message." -ForegroundColor White
+    Write-Host "  Config file: .gitwhisperconfig" -ForegroundColor White
+    Write-Host ""
+}
+
 switch ($Command.ToLower()) {
     "" { Invoke-Commit }
     "commit" { Invoke-Commit }
@@ -1658,6 +2093,8 @@ switch ($Command.ToLower()) {
     "amend" { Invoke-Amend }
     "changelog" { Invoke-Changelog -SinceTag:$SinceTag -Limit $Limit }
     "release" { Invoke-Release -ExtraArgs $ExtraArgs }
+    "init" { Invoke-Init -Force ($ExtraArgs -contains "--force" -or $ExtraArgs -contains "-Force") }
+    "suggest" { Invoke-Suggest }
     "pr" { Invoke-Pr -BaseBranch $Base -CreatePR ($ExtraArgs -contains "create") }
     default {
         Write-Host "Unknown command: $Command" -ForegroundColor Red
