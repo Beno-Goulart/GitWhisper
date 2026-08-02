@@ -62,11 +62,15 @@ run_sh() {
 run_ps1() {
     local stdin_data="${1:-}"
     shift
+    local ps_cmd="powershell.exe"
+    if ! command -v powershell.exe >/dev/null 2>&1; then
+        ps_cmd="pwsh"
+    fi
     local win="$PS1"
     if command -v cygpath >/dev/null 2>&1; then
         win=$(cygpath -m "$PS1")
     fi
-    RUN_OUT=$(printf '%s\n' "$stdin_data" | powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$win" "$@" 2>&1)
+    RUN_OUT=$(printf '%s\n' "$stdin_data" | "$ps_cmd" -NoProfile -ExecutionPolicy Bypass -File "$win" "$@" 2>&1)
     RUN_EXIT=$?
 }
 
@@ -96,7 +100,7 @@ make_baseline() {
 }
 
 HAVE_PS1=false
-if command -v powershell.exe >/dev/null 2>&1 && [ -f "$PS1" ]; then
+if [ -f "$PS1" ] && { command -v powershell.exe >/dev/null 2>&1 || command -v pwsh >/dev/null 2>&1; }; then
     HAVE_PS1=true
 fi
 
@@ -487,6 +491,61 @@ test_parity_cases() {
     printf 'CREATE TABLE users (id INT PRIMARY KEY, email TEXT);\n' > src/migrations/001_users.sql
     git add src/migrations/001_users.sql
     test_parity "modified migration sql"
+
+    new_repo
+    cp "$SH" ./gitwhisper.sh
+    git add gitwhisper.sh
+    make_baseline gitwhisper.sh
+    printf '\necho "noise feat perf docs"\n' >> gitwhisper.sh
+    git add gitwhisper.sh
+    test_parity "modified self sh"
+
+    new_repo
+    cp "$PS1" ./gitwhisper.ps1
+    git add gitwhisper.ps1
+    make_baseline gitwhisper.ps1
+    printf '\nWrite-Host "noise feat perf docs"\n' >> gitwhisper.ps1
+    git add gitwhisper.ps1
+    test_parity "modified self ps1"
+}
+
+#
+# self-script noise: when the diff touches gitwhisper.* / install.*, literal
+# strings inside the script must be ignored so they do not pollute the message.
+#
+test_self_script_noise() {
+    new_repo
+    cp "$SH" ./gitwhisper.sh
+    git add gitwhisper.sh
+    make_baseline gitwhisper.sh
+    cat >> gitwhisper.sh <<'NOISE'
+
+# comment with perf cache index memo throttle debounce batch optim
+echo "literal string with feat fix docs build ci style refactor perf"
+echo 'another literal: test chore revert db schema migration package.json'
+GITMOJI[perf]="x"
+NOISE
+    git add gitwhisper.sh
+    run_sh "" suggest
+    check_contains "self-script edit -> fix type" "fix" "$RUN_OUT"
+    check_contains "self-script edit -> gitwhisper scope" "gitwhisper" "$RUN_OUT"
+    check_not_contains "self-script edit -> no perf noise" "perf" "$RUN_OUT"
+
+    new_repo
+    cp "$PS1" ./gitwhisper.ps1
+    git add gitwhisper.ps1
+    make_baseline gitwhisper.ps1
+    cat >> gitwhisper.ps1 <<'NOISE'
+
+# comment with perf cache index memo throttle debounce batch optim
+Write-Host "literal string with feat fix docs build ci style refactor perf"
+$msg = 'another literal: test chore revert db schema migration package.json'
+NOISE
+    git add gitwhisper.ps1
+    run_sh "" suggest
+    check_contains "self-ps1 edit -> fix type" "fix" "$RUN_OUT"
+    check_contains "self-ps1 edit -> gitwhisper scope" "gitwhisper" "$RUN_OUT"
+    check_not_contains "self-ps1 edit -> no perf noise" "perf" "$RUN_OUT"
 }
 
 #
@@ -530,6 +589,9 @@ test_commit_msg_hook
 echo ""
 echo "--- interactive commit flow ---"
 test_interactive_commit
+echo ""
+echo "--- self-script noise filtering ---"
+test_self_script_noise
 echo ""
 echo "--- parity ps1 vs sh ---"
 test_parity_cases

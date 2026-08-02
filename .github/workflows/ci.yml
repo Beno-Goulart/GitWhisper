@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure PowerShell (ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v pwsh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y powershell
+          fi
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+
+      - name: Validate shell syntax
+        run: |
+          bash -n gitwhisper.sh
+          bash -n install.sh
+          bash -n tests/run_tests.sh
+
+      - name: Validate PowerShell syntax
+        run: |
+          if command -v pwsh >/dev/null 2>&1; then
+            pwsh -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw "gitwhisper.ps1")); $null = [scriptblock]::Create((Get-Content -Raw "install.ps1"))'
+          else
+            powershell.exe -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw "gitwhisper.ps1")); $null = [scriptblock]::Create((Get-Content -Raw "install.ps1"))'
+          fi
+
+      - name: Run test suite
+        run: GW_TEST_COMMITS=1 bash tests/run_tests.sh

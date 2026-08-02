@@ -168,7 +168,7 @@ edit_message_body() {
 }
 
 remove_literal_strings() {
-    perl -pe $'s/"[^"]*"/""/g; s/\x27[^\x27]*\x27/\x27\x27/g' <<< "$1"
+    perl -pe $'s/"(?:\\\\.|[^"\\\\])*"/""/g; s/\x27(?:\\\\.|[^\x27\\\\])*\x27/\x27\x27/g' <<< "$1"
 }
 
 contains_pattern() {
@@ -309,13 +309,12 @@ prepare_message() {
         fi
     done
 
+    if [[ "$SELF_SCRIPT" == true ]]; then
+        DIFF_CONTENT=$(remove_literal_strings "$DIFF_CONTENT")
+    fi
+
     ADDED_LINES=$(echo "$DIFF_CONTENT" | grep -E '^\+[^+]' || true)
     REMOVED_LINES=$(echo "$DIFF_CONTENT" | grep -E '^-[^-]' || true)
-
-    if [[ "$SELF_SCRIPT" == true ]]; then
-        ADDED_LINES=$(remove_literal_strings "$ADDED_LINES")
-        REMOVED_LINES=$(remove_literal_strings "$REMOVED_LINES")
-    fi
 
     TEST_COUNT=0
     NON_TEST_COUNT=0
