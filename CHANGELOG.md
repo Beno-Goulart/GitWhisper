@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 
 Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+## [0.2.1](2026-08-01)
+
+### General
+
+#### Refactoring
+
+- adds -Name parameter and adds Get-GithubUsername, Format-ReleaseBullet, Build-ReleaseNotes function
+
+
+### Contributors
+
+Thank you to 1 community contributor:
+
+@Beno-Goulart
+- refactor: adds -Name parameter and adds Get-GithubUsername, Format-ReleaseBullet, Build-ReleaseNotes function
+
+**Contributors:** @Beno-Goulart
+
 ## [0.2.0](2026-08-01)
 
 ### Features
@@ -76,6 +94,7 @@ Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 - **README:** adds git pull (f4a0993)
 - **README:** updates README.md (21d9d85)
 - **README:** updates README.md (3e666f8)
+
 
 
 
