@@ -276,6 +276,83 @@ test_suggest_branch_type() {
     check_contains "branch without prefix keeps diff fix" "fix(app)" "$RUN_OUT"
 }
 
+#
+# type refinement: avoid the over-use of `refactor` (multi-file modified,
+# deletions of docs, and feature-like mixed changes)
+#
+test_suggest_type_refinement() {
+    new_repo
+    echo "a1" > a.js
+    echo "b1" > b.js
+    echo "c1" > c.js
+    git add a.js b.js c.js
+    make_baseline a.js b.js c.js
+    printf 'a2\n' > a.js
+    printf 'b2\n' > b.js
+    printf 'c2\n' > c.js
+    git add a.js b.js c.js
+    run_sh "" suggest
+    check_contains "modified multiple js -> fix" "fix" "$RUN_OUT"
+    check_not_contains "modified multiple js -> not refactor" "refactor" "$RUN_OUT"
+    check_contains "modified multiple js -> updates" "updates" "$RUN_OUT"
+    run_ps1 "" suggest
+    check_contains "ps1 modified multiple js -> fix" "fix" "$RUN_OUT"
+    check_not_contains "ps1 modified multiple js -> not refactor" "refactor" "$RUN_OUT"
+
+    new_repo
+    echo "base1" > a.js
+    echo "base2" > b.js
+    git add a.js b.js
+    make_baseline a.js b.js
+    printf 'function newHelper() { return 1; }\n' >> a.js
+    printf 'const other = newHelper();\n' >> b.js
+    git add a.js b.js
+    run_sh "" suggest
+    check_contains "modified multiple js with added fn -> feat" "feat" "$RUN_OUT"
+    check_not_contains "modified multiple js with added fn -> not refactor" "refactor" "$RUN_OUT"
+    run_ps1 "" suggest
+    check_contains "ps1 modified multiple js with added fn -> feat" "feat" "$RUN_OUT"
+    check_not_contains "ps1 modified multiple js with added fn -> not refactor" "refactor" "$RUN_OUT"
+
+    new_repo
+    echo "a1" > a.js
+    echo "b1" > b.js
+    git add a.js b.js
+    make_baseline a.js b.js
+    printf 'function added() {}\n' > c.js
+    git add c.js
+    printf 'x\n' >> a.js
+    git add a.js
+    run_sh "" suggest
+    check_contains "mixed add+modify with added fn -> feat" "feat" "$RUN_OUT"
+    check_not_contains "mixed add+modify with added fn -> not refactor" "refactor" "$RUN_OUT"
+    run_ps1 "" suggest
+    check_contains "ps1 mixed add+modify with added fn -> feat" "feat" "$RUN_OUT"
+    check_not_contains "ps1 mixed add+modify with added fn -> not refactor" "refactor" "$RUN_OUT"
+
+    new_repo
+    mkdir -p docs
+    echo "readme-content" > README.md
+    echo "other-content" > docs/guide.md
+    git add README.md docs/guide.md
+    make_baseline README.md docs/guide.md
+    git rm -q README.md docs/guide.md
+    run_sh "" suggest
+    check_contains "deleted docs -> docs type" "docs" "$RUN_OUT"
+    check_not_contains "deleted docs -> not refactor" "refactor" "$RUN_OUT"
+    run_ps1 "" suggest
+    check_contains "ps1 deleted docs -> docs type" "docs" "$RUN_OUT"
+    check_not_contains "ps1 deleted docs -> not refactor" "refactor" "$RUN_OUT"
+
+    new_repo
+    echo "readme-content" > README.md
+    git add README.md
+    make_baseline README.md
+    git rm -q README.md
+    run_sh "" suggest
+    check_contains "deleted single doc -> removes README.md" "removes README.md" "$RUN_OUT"
+}
+
 test_suggest_config() {
     new_repo
     add_file "app.js" "console.log(1)"
@@ -733,6 +810,7 @@ test_suggest_basics
 test_suggest_scopes_and_types
 test_suggest_multiple_and_empty
 test_suggest_branch_type
+test_suggest_type_refinement
 test_suggest_config
 echo ""
 echo "--- init ---"

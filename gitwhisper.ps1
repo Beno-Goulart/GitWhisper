@@ -238,7 +238,7 @@ function Invoke-Commit {
 
     $diffIndex = git diff --staged --name-status
     $diffStat = git diff --staged --stat
-    $diffContent = git diff --staged
+    $diffContent = (@(git diff --staged) -join "`n")
 
     if (-not $diffIndex) {
         Write-Host "No changes found." -ForegroundColor Yellow
@@ -845,6 +845,14 @@ function Get-CommitType {
     $specificDesc = $specificParts -join " and "
 
     if ($Deleted.Count -gt 0 -and $Added.Count -eq 0 -and $Modified.Count -eq 0) {
+        $deletedIsDoc = $Deleted | Where-Object { $_ -match "\.(md|mdx|rst|txt)$|readme|changelog|docs/" }
+        if ($deletedIsDoc.Count -eq $Deleted.Count) {
+            if ($Deleted.Count -eq 1) {
+                $name = [System.IO.Path]::GetFileName($Deleted[0])
+                return @{ Type = "docs"; Desc = "removes $name" }
+            }
+            return @{ Type = "docs"; Desc = "removes $($Deleted.Count) documentation files" }
+        }
         if ($Deleted.Count -eq 1) {
             $name = [System.IO.Path]::GetFileName($Deleted[0])
             $baseName = [System.IO.Path]::GetFileNameWithoutExtension($Deleted[0])
@@ -976,9 +984,21 @@ function Get-CommitType {
             }
             return @{ Type = "fix"; Desc = "fixes $name"; Strong = $false }
         }
-        return @{ Type = "refactor"; Desc = "updates $($Modified.Count) files"; Strong = $false }
+        if ($specificDesc) {
+            if ($specificDesc -match "adds ") {
+                return @{ Type = "feat"; Desc = $specificDesc; Strong = $false }
+            }
+            if ($specificDesc -match "removes ") {
+                return @{ Type = "refactor"; Desc = $specificDesc; Strong = $false }
+            }
+            return @{ Type = "fix"; Desc = $specificDesc; Strong = $false }
+        }
+        return @{ Type = "fix"; Desc = "updates $($Modified.Count) files"; Strong = $false }
     }
 
+    if ($specificDesc -and $specificDesc -match "adds ") {
+        return @{ Type = "feat"; Desc = $specificDesc; Strong = $false }
+    }
     if ($specificDesc) {
         return @{ Type = "refactor"; Desc = $specificDesc; Strong = $false }
     }
@@ -1937,7 +1957,7 @@ function Get-SuggestedMessage {
 function Invoke-Suggest {
     $diffIndex = git diff --staged --name-status
     if (-not $diffIndex) { exit 0 }
-    $diffContent = git diff --staged
+    $diffContent = (@(git diff --staged) -join "`n")
 
     $added = @()
     $modified = @()

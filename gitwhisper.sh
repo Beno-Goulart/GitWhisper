@@ -453,17 +453,33 @@ prepare_message() {
     COMMIT_STRONG=true
 
     if [[ ${#DELETED[@]} -gt 0 && ${#ADDED[@]} -eq 0 && ${#MODIFIED[@]} -eq 0 ]]; then
-        COMMIT_STRONG=false
-        COMMIT_TYPE="refactor"
-        if [[ ${#DELETED[@]} -eq 1 ]]; then
-            NAME=$(basename "${DELETED[0]}")
-            if [[ -n "$SPECIFIC_DESC" ]]; then
-                COMMIT_DESC="$SPECIFIC_DESC from $NAME"
+        DEL_DOCS=1
+        for F in "${DELETED[@]}"; do
+            if ! echo "$F" | grep -qE '\.(md|mdx|rst|txt)$|readme|changelog|docs/'; then
+                DEL_DOCS=0
+                break
+            fi
+        done
+        if [[ "$DEL_DOCS" == 1 ]]; then
+            COMMIT_TYPE="docs"
+            if [[ ${#DELETED[@]} -eq 1 ]]; then
+                COMMIT_DESC="removes $(basename "${DELETED[0]}")"
             else
-                COMMIT_DESC="removes $NAME"
+                COMMIT_DESC="removes ${#DELETED[@]} documentation files"
             fi
         else
-            COMMIT_DESC="removes ${#DELETED[@]} files"
+            COMMIT_STRONG=false
+            COMMIT_TYPE="refactor"
+            if [[ ${#DELETED[@]} -eq 1 ]]; then
+                NAME=$(basename "${DELETED[0]}")
+                if [[ -n "$SPECIFIC_DESC" ]]; then
+                    COMMIT_DESC="$SPECIFIC_DESC from $NAME"
+                else
+                    COMMIT_DESC="removes $NAME"
+                fi
+            else
+                COMMIT_DESC="removes ${#DELETED[@]} files"
+            fi
         fi
     elif [[ $CONFIG_COUNT -gt 0 && $OTHER_COUNT -eq 0 && $DOC_COUNT -eq 0 && $CI_COUNT -eq 0 ]]; then
         COMMIT_TYPE="build"
@@ -560,20 +576,36 @@ prepare_message() {
             esac
         else
             COMMIT_STRONG=false
-            COMMIT_TYPE="refactor"
-            COMMIT_DESC="updates ${#MODIFIED[@]} files"
+            if [[ -n "$SPECIFIC_DESC" && "$SPECIFIC_DESC" == *"adds "* ]]; then
+                COMMIT_TYPE="feat"
+                COMMIT_DESC="$SPECIFIC_DESC"
+            elif [[ -n "$SPECIFIC_DESC" && "$SPECIFIC_DESC" == *"removes "* ]]; then
+                COMMIT_TYPE="refactor"
+                COMMIT_DESC="$SPECIFIC_DESC"
+            elif [[ -n "$SPECIFIC_DESC" ]]; then
+                COMMIT_TYPE="fix"
+                COMMIT_DESC="$SPECIFIC_DESC"
+            else
+                COMMIT_TYPE="fix"
+                COMMIT_DESC="updates ${#MODIFIED[@]} files"
+            fi
         fi
     else
         COMMIT_STRONG=false
-        COMMIT_TYPE="refactor"
-        if [[ -n "$SPECIFIC_DESC" ]]; then
+        if [[ -n "$SPECIFIC_DESC" && "$SPECIFIC_DESC" == *"adds "* ]]; then
+            COMMIT_TYPE="feat"
             COMMIT_DESC="$SPECIFIC_DESC"
         else
-            PARTS=()
-            [[ ${#ADDED[@]} -gt 0 ]] && PARTS+=("${#ADDED[@]} added")
-            [[ ${#MODIFIED[@]} -gt 0 ]] && PARTS+=("${#MODIFIED[@]} modified")
-            [[ ${#DELETED[@]} -gt 0 ]] && PARTS+=("${#DELETED[@]} removed")
-            COMMIT_DESC=$(IFS=', '; echo "${PARTS[*]}")
+            COMMIT_TYPE="refactor"
+            if [[ -n "$SPECIFIC_DESC" ]]; then
+                COMMIT_DESC="$SPECIFIC_DESC"
+            else
+                PARTS=()
+                [[ ${#ADDED[@]} -gt 0 ]] && PARTS+=("${#ADDED[@]} added")
+                [[ ${#MODIFIED[@]} -gt 0 ]] && PARTS+=("${#MODIFIED[@]} modified")
+                [[ ${#DELETED[@]} -gt 0 ]] && PARTS+=("${#DELETED[@]} removed")
+                COMMIT_DESC=$(IFS=', '; echo "${PARTS[*]}")
+            fi
         fi
     fi
 
