@@ -559,8 +559,16 @@ test_commit_flow() {
     new_repo
     add_file "app.js" "console.log(1)"
     run_sh "" init >/dev/null 2>&1
+
     run_sh "" changelog >/dev/null 2>&1
+    check_exit "changelog no commits exits 0" 0 "$RUN_EXIT"
     check_contains "changelog warns when no commits" "No commits" "$RUN_OUT"
+    check_not_contains "changelog no fatal leak" "fatal:" "$RUN_OUT"
+
+    run_ps1 "" changelog >/dev/null 2>&1
+    check_exit "ps1 changelog no commits exits 0" 0 "$RUN_EXIT"
+    check_contains "ps1 changelog warns when no commits" "No commits" "$RUN_OUT"
+    check_not_contains "ps1 changelog no fatal leak" "fatal:" "$RUN_OUT"
 }
 
 #

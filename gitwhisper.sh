@@ -1181,15 +1181,15 @@ invoke_changelog() {
     done
 
     if [[ "$SINCE_TAG" == true ]]; then
-        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
-        if [[ $? -eq 0 && -n "$LAST_TAG" ]]; then
-            LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short)
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+        if [[ -n "$LAST_TAG" ]]; then
+            LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short 2>/dev/null || true)
         else
             echo -e "\033[33mNo tags found. Showing all commits.\033[0m"
-            LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n "$LIMIT")
+            LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n "$LIMIT" 2>/dev/null || true)
         fi
     else
-        LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n "$LIMIT")
+        LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n "$LIMIT" 2>/dev/null || true)
     fi
 
     if [[ -z "$LOG" ]]; then
@@ -1239,8 +1239,8 @@ invoke_changelog() {
         exit 0
     fi
 
-    LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
-    if [[ $? -eq 0 && -n "$LAST_TAG" ]]; then
+    LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+    if [[ -n "$LAST_TAG" ]]; then
         CURRENT_VERSION="${LAST_TAG#v}"
     else
         CURRENT_VERSION="0.1.0"
@@ -1330,7 +1330,7 @@ invoke_pr() {
         exit 1
     fi
 
-    LOG=$(git log "$MERGE_BASE..$BRANCH" --pretty=format:"%H|%s|%ad" --date=short --no-merges 2>/dev/null)
+    LOG=$(git log "$MERGE_BASE..$BRANCH" --pretty=format:"%H|%s|%ad" --date=short --no-merges 2>/dev/null || true)
     if [[ -z "$LOG" ]]; then
         echo -e "\033[33mNo commits found between $BASE_BRANCH and $BRANCH.\033[0m"
         exit 0
@@ -1528,11 +1528,11 @@ invoke_release() {
     fi
 
     if [[ -n "$LAST_TAG" ]]; then
-        LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short)
+        LOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short 2>/dev/null || true)
     else
         echo ""
         echo -e "  \033[33mNo tags found. Releasing from the beginning of history.\033[0m"
-        LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short)
+        LOG=$(git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short 2>/dev/null || true)
     fi
 
     if [[ -z "$LOG" ]]; then

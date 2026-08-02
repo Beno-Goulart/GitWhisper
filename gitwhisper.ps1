@@ -989,7 +989,11 @@ function Invoke-Pr {
         exit 1
     }
 
-    $log = git log "$mergeBase..$branch" --pretty=format:"%H|%s|%ad" --date=short --no-merges
+    try {
+        $log = git log "$mergeBase..$branch" --pretty=format:"%H|%s|%ad" --date=short --no-merges 2>$null
+    } catch {
+        $log = ""
+    }
     if (-not $log) {
         Write-Host "No commits found between $BaseBranch and $branch." -ForegroundColor Yellow
         exit 0
@@ -1153,13 +1157,16 @@ function Invoke-Changelog {
         } catch { $lastTag = "" }
 
         if ($lastTag) {
-            $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short
+            try { $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short 2>$null }
+            catch { $log = "" }
         } else {
             Write-Host "No tags found. Showing all commits." -ForegroundColor Yellow
-            $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n $Limit
+            try { $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n $Limit 2>$null }
+            catch { $log = "" }
         }
     } else {
-        $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n $Limit
+        try { $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short -n $Limit 2>$null }
+        catch { $log = "" }
     }
 
     if (-not $log) {
@@ -1445,11 +1452,13 @@ function Invoke-Release {
     } catch { $lastTag = "" }
 
     if ($lastTag) {
-        $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short
+        try { $log = git log "$lastTag..HEAD" --pretty=format:"%H|%s|%ad|%an|%ae" --date=short 2>$null }
+        catch { $log = "" }
     } else {
         Write-Host ""
         Write-Host "  No tags found. Releasing from the beginning of history." -ForegroundColor Yellow
-        $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short
+        try { $log = git log --pretty=format:"%H|%s|%ad|%an|%ae" --date=short 2>$null }
+        catch { $log = "" }
     }
 
     if (-not $log) {
