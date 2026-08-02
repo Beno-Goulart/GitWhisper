@@ -653,8 +653,8 @@ function Get-CommitType {
         $DiffContent = Remove-LiteralStrings -Content $DiffContent
     }
 
-    $allModified = $AddedLower + $ModifiedLower
-    $allChanged  = $AddedLower + $ModifiedLower + $DeletedLower
+    $allModified = @(($AddedLower + $ModifiedLower) | Where-Object { $_ })
+    $allChanged  = @(($AddedLower + $ModifiedLower + $DeletedLower) | Where-Object { $_ })
 
     $testFiles = $allModified | Where-Object { $_ -match "(test|spec|\.test\.|\.spec\.)" }
     $nonTestFiles = $allModified | Where-Object { $_ -notmatch "(test|spec|\.test\.|\.spec\.)" }
@@ -701,8 +701,19 @@ function Get-CommitType {
         $dbPatterns | Where-Object { $file -match $_ }
     }
 
+    $otherFiles = $allChanged | Where-Object {
+        $file = $_
+        $file -notmatch "(test|spec|\.test\.|\.spec\.)" -and
+        -not ($configPatterns | Where-Object { $file -match $_ }) -and
+        -not ($ciPatterns | Where-Object { $file -match $_ }) -and
+        -not ($docPatterns | Where-Object { $file -match $_ }) -and
+        -not ($stylePatterns | Where-Object { $file -match $_ }) -and
+        -not ($dbPatterns | Where-Object { $file -match $_ })
+    }
+
     $isScript = $allChanged | Where-Object { $_ -match "(commit-msg|\.sh$|\.ps1$|\.py$|\.rb$|\.js$|\.ts$)" }
-    $hasPerfContent = $DiffContent -match "(perf|optim|cache|lazy|memo|defer|throttle|debounce|batch|index)"
+    $perfContent = ($DiffContent -split "`n" | Where-Object { $_ -match "^[+-][^+-]" }) -join "`n"
+    $hasPerfContent = $perfContent -match "(perf|optim|cache|lazy|memo|defer|throttle|debounce|batch|index)"
 
     $hasBreaking = $DiffContent -match "(BREAKING|breaking.change)"
 
@@ -817,7 +828,7 @@ function Get-CommitType {
         }
     }
 
-    if ($isConfig.Count -gt 0 -and $nonTestFiles.Count -eq 0 -and $isDoc.Count -eq 0 -and $isCI.Count -eq 0) {
+    if ($isConfig.Count -gt 0 -and $otherFiles.Count -eq 0 -and $isDoc.Count -eq 0 -and $isCI.Count -eq 0) {
         if ($isCI.Count -gt 0) {
             return @{ Type = "ci"; Desc = "updates CI configuration" }
         }
@@ -835,7 +846,7 @@ function Get-CommitType {
         return @{ Type = "chore"; Desc = "updates configuration" }
     }
 
-    if ($isCI.Count -gt 0 -and $nonTestFiles.Count -eq 0) {
+    if ($isCI.Count -gt 0 -and $otherFiles.Count -eq 0) {
         return @{ Type = "ci"; Desc = "updates CI pipeline" }
     }
 
@@ -875,7 +886,7 @@ function Get-CommitType {
         return @{ Type = "style"; Desc = "fixes formatting" }
     }
 
-    if ($isDB.Count -gt 0 -and $nonTestFiles.Count -eq 0) {
+    if ($isDB.Count -gt 0 -and $otherFiles.Count -eq 0) {
         if ($Added.Count -gt 0 -and $Modified.Count -eq 0) {
             $tableNames = [regex]::Matches($diffAll, "(?:CREATE TABLE|ALTER TABLE|INSERT INTO)\s+(\w+)")
             if ($tableNames.Count -gt 0) {
@@ -888,7 +899,7 @@ function Get-CommitType {
     }
 
     if ($hasPerfContent -and $Added.Count -eq 0 -and $isDoc.Count -eq 0 -and $isConfig.Count -eq 0 -and $testFiles.Count -eq 0 -and $isStyle.Count -eq 0 -and $isScript.Count -eq 0) {
-        $perfItems = [regex]::Matches($diffAll, "(cache|memo|lazy|defer|throttle|debounce|batch|index|optim)")
+        $perfItems = [regex]::Matches($perfContent, "(cache|memo|lazy|defer|throttle|debounce|batch|index|optim)")
         if ($perfItems.Count -gt 0) {
             $items = ($perfItems | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Select-Object -First 2) -join ", "
             return @{ Type = "perf"; Desc = "adds $items optimization" }
@@ -1986,7 +1997,7 @@ function Get-CommitMsgHookContent {
 MSG_FILE="$1"
 
 FIRST_LINE=""
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
         \#*) continue ;;
         "") continue ;;

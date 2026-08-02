@@ -46,7 +46,7 @@ if [[ ! -d ".git" ]]; then
 fi
 
 invoke_undo() {
-    LAST_MSG=$(git log -1 --format="%s" 2>/dev/null)
+    LAST_MSG=$(git log -1 --format="%s" 2>/dev/null || true)
     if [[ -z "$LAST_MSG" ]]; then
         echo -e "\033[33mNothing to undo.\033[0m"
         exit 0
@@ -94,8 +94,8 @@ invoke_undo() {
 }
 
 invoke_amend() {
-    LAST_MSG=$(git log -1 --format="%s" 2>/dev/null)
-    LAST_BODY=$(git log -1 --format="%b" 2>/dev/null)
+    LAST_MSG=$(git log -1 --format="%s" 2>/dev/null || true)
+    LAST_BODY=$(git log -1 --format="%b" 2>/dev/null || true)
     if [[ -z "$LAST_MSG" ]]; then
         echo -e "\033[33mNo commits to amend.\033[0m"
         exit 0
@@ -324,6 +324,7 @@ prepare_message() {
     DOC_COUNT=0
     STYLE_COUNT=0
     DB_COUNT=0
+    OTHER_COUNT=0
 
     for f in "${ALL_CHANGED_LOWER[@]}"; do
         is_test_file "$f" && ((TEST_COUNT+=1)) || ((NON_TEST_COUNT+=1))
@@ -332,6 +333,9 @@ prepare_message() {
         is_doc_file "$f" && ((DOC_COUNT+=1))
         is_style_file "$f" && ((STYLE_COUNT+=1))
         is_db_file "$f" && ((DB_COUNT+=1))
+        if ! is_test_file "$f" && ! is_config_file "$f" && ! is_ci_file "$f" && ! is_doc_file "$f" && ! is_style_file "$f" && ! is_db_file "$f"; then
+            ((OTHER_COUNT+=1))
+        fi
     done
 
     HAS_PERF=false
@@ -343,7 +347,8 @@ prepare_message() {
         fi
     done
 
-    if [[ "$DIFF_CONTENT" =~ (perf|optim|cache|lazy|memo|defer|throttle|debounce|batch|index) ]]; then
+    PERF_CONTENT=$(echo "$DIFF_CONTENT" | grep -E '^[+-][^+-]' || true)
+    if [[ "$PERF_CONTENT" =~ (perf|optim|cache|lazy|memo|defer|throttle|debounce|batch|index) ]]; then
         if [[ $DOC_COUNT -eq 0 && $CONFIG_COUNT -eq 0 && $TEST_COUNT -eq 0 && $STYLE_COUNT -eq 0 && "$IS_SCRIPT" == false ]]; then
             HAS_PERF=true
         fi
@@ -423,7 +428,7 @@ prepare_message() {
     SPECIFIC_DESC=""
     if [[ ${#SPECIFIC_PARTS[@]} -gt 0 ]]; then
         SPECIFIC_DESC=$(printf ' and %s' "${SPECIFIC_PARTS[@]}" | sed 's/  */ /g')
-        SPECIFIC_DESC="${SPECIFIC_DESC:4}"
+        SPECIFIC_DESC="${SPECIFIC_DESC:5}"
     fi
 
     COMMIT_TYPE=""
@@ -441,10 +446,10 @@ prepare_message() {
         else
             COMMIT_DESC="removes ${#DELETED[@]} files"
         fi
-    elif [[ $CONFIG_COUNT -gt 0 && $NON_TEST_COUNT -eq 0 && $DOC_COUNT -eq 0 && $CI_COUNT -eq 0 ]]; then
+    elif [[ $CONFIG_COUNT -gt 0 && $OTHER_COUNT -eq 0 && $DOC_COUNT -eq 0 && $CI_COUNT -eq 0 ]]; then
         COMMIT_TYPE="build"
         COMMIT_DESC="updates configuration"
-    elif [[ $CI_COUNT -gt 0 && $NON_TEST_COUNT -eq 0 ]]; then
+    elif [[ $CI_COUNT -gt 0 && $OTHER_COUNT -eq 0 ]]; then
         COMMIT_TYPE="ci"
         COMMIT_DESC="updates CI pipeline"
     elif [[ $DOC_COUNT -gt 0 && $NON_TEST_COUNT -eq 0 && $CONFIG_COUNT -eq 0 ]]; then
@@ -468,9 +473,19 @@ prepare_message() {
         else
             COMMIT_DESC="fixes formatting"
         fi
-    elif [[ $DB_COUNT -gt 0 && $NON_TEST_COUNT -eq 0 ]]; then
-        COMMIT_TYPE="db"
-        COMMIT_DESC="updates database schema"
+    elif [[ $DB_COUNT -gt 0 && $OTHER_COUNT -eq 0 ]]; then
+        if [[ ${#ADDED[@]} -gt 0 && ${#MODIFIED[@]} -eq 0 ]]; then
+            COMMIT_TYPE="feat"
+            TABLES=$(echo "$DIFF_CONTENT" | grep -oE '(CREATE TABLE|ALTER TABLE|INSERT INTO)[[:space:]]+[A-Za-z0-9_]+' | sed -E 's/^(CREATE TABLE|ALTER TABLE|INSERT INTO)[[:space:]]+//' | awk '!seen[$0]++' | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
+            if [[ -n "$TABLES" ]]; then
+                COMMIT_DESC="adds migration for $TABLES"
+            else
+                COMMIT_DESC="adds database migration"
+            fi
+        else
+            COMMIT_TYPE="fix"
+            COMMIT_DESC="fixes database schema"
+        fi
     elif [[ "$HAS_PERF" == true ]]; then
         COMMIT_TYPE="perf"
         COMMIT_DESC="improves performance"
@@ -604,7 +619,9 @@ prepare_message() {
 
 load_gw_config() {
     GW_CONFIG=()
-    [[ -f ".gitwhisperconfig" ]] || return
+    if [[ ! -f ".gitwhisperconfig" ]]; then
+        return 0
+    fi
     local section="" raw key val
     while IFS= read -r raw; do
         raw=$(echo "$raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -740,7 +757,7 @@ get_commit_msg_hook_content() {
 MSG_FILE="$1"
 
 FIRST_LINE=""
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
         \#*) continue ;;
         "") continue ;;
