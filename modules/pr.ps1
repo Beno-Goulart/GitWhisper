@@ -52,6 +52,10 @@ function Invoke-Pr {
     $emojiMap["chore"]    = [char]::ConvertFromUtf32(0x1F528)
     $emojiMap["revert"]   = [char]::ConvertFromUtf32(0x23EA)
 
+    foreach ($t in $script:gwTypeEmoji.Keys) {
+        $emojiMap[$t] = $script:gwTypeEmoji[$t]
+    }
+
     $types = @{
         "feat"     = @{ Emoji = $emojiMap["feat"];     Title = "Features";       Commits = @() }
         "fix"      = @{ Emoji = $emojiMap["fix"];      Title = "Bug Fixes";       Commits = @() }
@@ -64,6 +68,11 @@ function Invoke-Pr {
         "chore"    = @{ Emoji = $emojiMap["chore"];    Title = "Chores";          Commits = @() }
         "style"    = @{ Emoji = $emojiMap["style"];    Title = "Style";           Commits = @() }
         "revert"   = @{ Emoji = $emojiMap["revert"];   Title = "Reverts";         Commits = @() }
+    }
+    foreach ($t in $script:gwTypeTitles.Keys) {
+        if (-not $types.ContainsKey($t)) { $types[$t] = @{ Emoji = [char]::ConvertFromUtf32(0x1F528); Title = $t; Commits = @() } }
+        $types[$t].Title = $script:gwTypeTitles[$t]
+        if ($script:gwTypeEmoji.ContainsKey($t)) { $types[$t].Emoji = $script:gwTypeEmoji[$t] }
     }
 
     $allCommits = @()
@@ -118,7 +127,15 @@ $summary
 ## Changes
 "@
 
-    foreach ($type in @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")) {
+    $renderOrder = @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")
+    if ($script:gwTypeOrder.Count -gt 0) {
+        $renderOrder = @($script:gwTypeOrder)
+        foreach ($t in @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")) {
+            if ($renderOrder -notcontains $t) { $renderOrder += $t }
+        }
+    }
+
+    foreach ($type in $renderOrder) {
         $td = $types[$type]
         if ($td.Commits.Count -gt 0) {
             $prBody += "`n### $($td.Title)`n"

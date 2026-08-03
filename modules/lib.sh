@@ -27,6 +27,10 @@ declare -A RELEASE_AUTHORS=()
 declare -A RELEASE_AUTHOR_ENTRIES=()
 
 declare -A GW_CONFIG
+declare -A GW_TYPE_EMOJI=()
+declare -A GW_SCOPE_MAP=()
+declare -A GW_TYPE_ORDER_HINTS=()
+GW_FORCED_SCOPE=""
 
 edit_message_body() {
     local -a body=("$@")
@@ -503,6 +507,20 @@ prepare_message() {
         SCOPE=$(get_branch_scope)
     fi
 
+    if [[ -n "$GW_FORCED_SCOPE" ]]; then
+        SCOPE="$GW_FORCED_SCOPE"
+    elif [[ ${#GW_SCOPE_MAP[@]} -gt 0 ]]; then
+        local _pat _gw_f
+        for _pat in "${!GW_SCOPE_MAP[@]}"; do
+            for _gw_f in "${ALL_FILES[@]}"; do
+                if [[ "$_gw_f" == "$_pat"* ]]; then
+                    SCOPE="${GW_SCOPE_MAP[$_pat]}"
+                    break 2
+                fi
+            done
+        done
+    fi
+
     declare -A GITMOJI
     GITMOJI[feat]="✨"
     GITMOJI[fix]="🐛"
@@ -516,6 +534,11 @@ prepare_message() {
     GITMOJI[chore]="🔨"
     GITMOJI[db]="🗃️"
     GITMOJI[revert]="⏪"
+
+    local _gw_t
+    for _gw_t in "${!GW_TYPE_EMOJI[@]}"; do
+        GITMOJI["$_gw_t"]="${GW_TYPE_EMOJI["$_gw_t"]}"
+    done
 
     EMOJI="${GITMOJI[$COMMIT_TYPE]:-🔨}"
 
@@ -583,8 +606,59 @@ load_gw_config() {
             val="${BASH_REMATCH[2]}"
             val=$(echo "$val" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             GW_CONFIG["${section}.${key}"]="$val"
+            case "$section" in
+                types)
+                    if [[ "$key" == *.order ]]; then
+                        local base="${key%.order}"
+                        if [[ "$val" =~ ^[0-9]+$ ]]; then
+                            GW_TYPE_ORDER_HINTS["$base"]="$val"
+                        fi
+                        continue
+                    fi
+                    # <type> = <emoji>|<Section Title>   (title optional)
+                    local emoji="${val%%|*}"
+                    GW_TYPE_EMOJI["$key"]="$emoji"
+                    if [[ "$val" == *"|"* ]]; then
+                        TYPE_TITLES["$key"]="${val#*|}"
+                    fi
+                    if ! contains_pattern "${TYPE_ORDER[@]}" "^${key}$"; then
+                        TYPE_ORDER+=("$key")
+                    fi
+                    ;;
+                scope)
+                    # <path pattern> = <scope>
+                    GW_SCOPE_MAP["$key"]="$val"
+                    ;;
+                general)
+                    if [[ "$key" == "scope" ]]; then
+                        GW_FORCED_SCOPE="$val"
+                    fi
+                    ;;
+            esac
         fi
     done < ".gitwhisperconfig"
+
+    if [[ ${#GW_TYPE_ORDER_HINTS[@]} -gt 0 ]]; then
+        sort_type_order
+    fi
+}
+
+sort_type_order() {
+    local t hint i inserted
+    local -a sorted_arr=()
+    for t in "${TYPE_ORDER[@]}"; do
+        hint="${GW_TYPE_ORDER_HINTS[$t]:-999}"
+        inserted=false
+        for i in "${!sorted_arr[@]}"; do
+            if (( hint < ${GW_TYPE_ORDER_HINTS[${sorted_arr[$i]}]:-999} )); then
+                sorted_arr=("${sorted_arr[@]:0:$i}" "$t" "${sorted_arr[@]:$i}")
+                inserted=true
+                break
+            fi
+        done
+        [[ "$inserted" == false ]] && sorted_arr+=("$t")
+    done
+    TYPE_ORDER=("${sorted_arr[@]}")
 }
 
 get_github_user() {

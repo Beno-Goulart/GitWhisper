@@ -6,11 +6,21 @@
 # They are excluded from the "community contributors" section.
 $script:coreMaintainers = @()
 
+# Customization loaded from the project's .gitwhisperconfig
+# ([types], [scope] and [general] scope/emoji overrides).
+$script:gwTypeEmoji = @{}
+$script:gwTypeTitles = @{}
+$script:gwTypeOrder = @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")
+$script:gwTypeOrderHints = @{}
+$script:gwScopeMap = @{}
+$script:gwForcedScope = ""
+$script:gwEmoji = $true
+
 function Get-GwConfig {
     $cfg = @{}
     if (-not (Test-Path ".gitwhisperconfig")) { return $cfg }
     $section = ""
-    foreach ($raw in Get-Content ".gitwhisperconfig") {
+    foreach ($raw in Get-Content ".gitwhisperconfig" -Encoding UTF8) {
         $line = $raw.Trim()
         if (-not $line -or $line.StartsWith("#") -or $line.StartsWith(";")) { continue }
         if ($line -match "^\[(.+)\]$") { $section = $Matches[1].Trim(); continue }
@@ -480,6 +490,30 @@ function Format-ReleaseBullet {
     return $line
 }
 
+function Get-ReleaseTypes {
+    $types = @{
+        "feat"     = @{ Title = "Features";       Commits = @() }
+        "fix"      = @{ Title = "Bug Fixes";       Commits = @() }
+        "perf"     = @{ Title = "Performance";     Commits = @() }
+        "refactor" = @{ Title = "Refactoring";     Commits = @() }
+        "docs"     = @{ Title = "Documentation";   Commits = @() }
+        "test"     = @{ Title = "Tests";           Commits = @() }
+        "build"    = @{ Title = "Build";           Commits = @() }
+        "ci"       = @{ Title = "CI/CD";           Commits = @() }
+        "chore"    = @{ Title = "Chores";          Commits = @() }
+        "style"    = @{ Title = "Style";           Commits = @() }
+        "revert"   = @{ Title = "Reverts";         Commits = @() }
+    }
+    foreach ($t in $script:gwTypeTitles.Keys) {
+        if (-not $types.ContainsKey($t)) { $types[$t] = @{ Title = $t; Commits = @() } }
+        $types[$t].Title = $script:gwTypeTitles[$t]
+    }
+    foreach ($t in $script:gwTypeOrder) {
+        if (-not $types.ContainsKey($t)) { $types[$t] = @{ Title = $t; Commits = @() } }
+    }
+    return $types
+}
+
 function Build-ReleaseNotes {
     param(
         [hashtable]$Types,
@@ -502,7 +536,14 @@ function Build-ReleaseNotes {
     }
     $areaOrder = @($areaStats | Where-Object { $_.Name -ne "General" } | Sort-Object Count -Descending) + @($areaStats | Where-Object { $_.Name -eq "General" })
 
-    $typeOrder = @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")
+    if ($script:gwTypeOrder.Count -gt 0) {
+        $typeOrder = @($script:gwTypeOrder)
+        foreach ($t in @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")) {
+            if ($typeOrder -notcontains $t) { $typeOrder += $t }
+        }
+    } else {
+        $typeOrder = @("feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore", "style", "revert")
+    }
 
     $notes = ""
     foreach ($area in $areaOrder) {
@@ -573,6 +614,18 @@ function Get-SuggestedMessage {
 
     $scope = Get-Scope -Files $allFiles
     if (-not $scope) { $scope = Get-BranchScope }
+
+    if ($script:gwForcedScope) {
+        $scope = $script:gwForcedScope
+    }
+    elseif ($script:gwScopeMap.Count -gt 0) {
+        foreach ($pat in $script:gwScopeMap.Keys) {
+            foreach ($f in $allFiles) {
+                if ($f.StartsWith($pat)) { $scope = $script:gwScopeMap[$pat]; break }
+            }
+            if ($scope) { break }
+        }
+    }
 
     $result = Get-CommitType -Added $Added -Modified $Modified -Deleted $Deleted `
         -AddedLower ($allFiles | ForEach-Object { $_.ToLower() }) `
@@ -716,6 +769,10 @@ function Get-SuggestedMessage {
     $gitmoji["ci"]       = [char]::ConvertFromUtf32(0x1F477)
     $gitmoji["chore"]    = [char]::ConvertFromUtf32(0x1F528)
     $gitmoji["revert"]   = [char]::ConvertFromUtf32(0x23EA)
+
+    foreach ($t in $script:gwTypeEmoji.Keys) {
+        $gitmoji[$t] = $script:gwTypeEmoji[$t]
+    }
 
     $emoji = $gitmoji[$type]
 

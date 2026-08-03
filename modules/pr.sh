@@ -45,6 +45,7 @@ invoke_pr() {
 
     declare -a FEAT=() FIX=() PERF=() REFACTOR=() DOCS=() TEST=()
     declare -a BUILD=() CI=() CHORE=() STYLE=() REVERT=() OTHER=()
+    declare -A CUSTOM_GROUPS=() CUSTOM_TITLES=() CUSTOM_EMOJI=()
     TOTAL=0
 
     while IFS= read -r line; do
@@ -78,7 +79,15 @@ invoke_pr() {
             chore)    CHORE+=("$ENTRY") ;;
             style)    STYLE+=("$ENTRY") ;;
             revert)   REVERT+=("$ENTRY") ;;
-            *)        OTHER+=("$ENTRY") ;;
+            *)
+                if [[ -n "${TYPE_TITLES[$TYPE]:-}${GW_TYPE_EMOJI[$TYPE]:-}" ]]; then
+                    CUSTOM_GROUPS["$TYPE"]+="$ENTRY"$'\n'
+                    CUSTOM_TITLES["$TYPE"]="${TYPE_TITLES[$TYPE]:-$TYPE}"
+                    [[ -z "${CUSTOM_EMOJI[$TYPE]:-}" ]] && CUSTOM_EMOJI["$TYPE"]="${GW_TYPE_EMOJI[$TYPE]:-🔨}"
+                else
+                    OTHER+=("$ENTRY")
+                fi
+                ;;
         esac
         TOTAL=$((TOTAL + 1))
     done <<< "$LOG"
@@ -131,6 +140,16 @@ invoke_pr() {
     write_pr_section "🔨" "Chores" "${CHORE[@]}"
     write_pr_section "💄" "Style" "${STYLE[@]}"
     write_pr_section "⏪" "Reverts" "${REVERT[@]}"
+
+    for _ct in "${!CUSTOM_GROUPS[@]}"; do
+        PR_BODY+=$'\n'"### ${CUSTOM_TITLES[$_ct]}"
+        PR_BODY+=$'\n'""
+        while IFS= read -r entry; do
+            [[ -n "$entry" ]] && PR_BODY+=$'\n'"${CUSTOM_EMOJI[$_ct]} $entry"
+        done <<< "${CUSTOM_GROUPS[$_ct]%$'\n'}"
+        PR_BODY+=$'\n'""
+    done
+
     write_pr_section "📦" "Other" "${OTHER[@]}"
 
     PR_BODY+=$'\n'"---"

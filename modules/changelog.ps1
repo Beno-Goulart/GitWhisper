@@ -31,19 +31,7 @@ function Invoke-Changelog {
         exit 0
     }
 
-    $types = @{
-        "feat"     = @{ Title = "Features";       Commits = @() }
-        "fix"      = @{ Title = "Bug Fixes";       Commits = @() }
-        "perf"     = @{ Title = "Performance";     Commits = @() }
-        "refactor" = @{ Title = "Refactoring";     Commits = @() }
-        "docs"     = @{ Title = "Documentation";   Commits = @() }
-        "test"     = @{ Title = "Tests";           Commits = @() }
-        "build"    = @{ Title = "Build";           Commits = @() }
-        "ci"       = @{ Title = "CI/CD";           Commits = @() }
-        "chore"    = @{ Title = "Chores";          Commits = @() }
-        "style"    = @{ Title = "Style";           Commits = @() }
-        "revert"   = @{ Title = "Reverts";         Commits = @() }
-    }
+    $types = Get-ReleaseTypes
 
     $allCommits = @()
     $dates = @{}

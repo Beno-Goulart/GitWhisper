@@ -63,6 +63,35 @@ $gwConfig = Get-GwConfig
 if ($gwConfig["general.core_maintainers"]) {
     $script:coreMaintainers = @($gwConfig["general.core_maintainers"] -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
+if ($gwConfig["general.scope"]) {
+    $script:gwForcedScope = $gwConfig["general.scope"]
+}
+foreach ($k in $gwConfig.Keys) {
+    if ($k -like "types.*.order") {
+        $base = $k.Substring(6, $k.Length - 12)
+        $hint = 0
+        if ([int]::TryParse($gwConfig[$k], [ref]$hint)) {
+            $script:gwTypeOrderHints[$base] = $hint
+        }
+    }
+    elseif ($k -like "types.*") {
+        $type = $k.Substring(6)
+        $parts = @($gwConfig[$k] -split "\|")
+        $script:gwTypeEmoji[$type] = $parts[0].Trim()
+        if ($parts.Count -gt 1 -and $parts[1].Trim()) {
+            $script:gwTypeTitles[$type] = $parts[1].Trim()
+        }
+        if ($script:gwTypeOrder -notcontains $type) { $script:gwTypeOrder += $type }
+    }
+    elseif ($k -like "scope.*") {
+        $script:gwScopeMap[$k.Substring(6)] = $gwConfig[$k]
+    }
+}
+if ($script:gwTypeOrderHints.Count -gt 0) {
+    $script:gwTypeOrder = @($script:gwTypeOrder | Sort-Object @{ Expression = {
+        if ($script:gwTypeOrderHints.ContainsKey($_)) { $script:gwTypeOrderHints[$_] } else { 999 }
+    }; Ascending = $true })
+}
 
 switch ($Command.ToLower()) {
     "" { Invoke-Commit }

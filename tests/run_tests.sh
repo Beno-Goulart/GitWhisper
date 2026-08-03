@@ -80,6 +80,7 @@ new_repo() {
     git init -q "$REPO"
     git -C "$REPO" config user.email "test@example.com"
     git -C "$REPO" config user.name "Test"
+    git -C "$REPO" config commit.gpgsign false
     cd "$REPO" || return 1
 }
 
@@ -381,6 +382,63 @@ default = 99
 EOF
     run_sh "" suggest
     check_contains "invalid default -> falls back to 1" "✨" "$RUN_OUT"
+}
+
+#
+# custom .gitwhisperconfig: [types] emoji/title/order, [scope] map, forced scope
+#
+test_custom_config() {
+    new_repo
+    add_file "app.js" "console.log(1)"
+
+    cat > .gitwhisperconfig <<'EOF'
+[general]
+default = 1
+[types]
+feat = 🚀|🚀 Features
+EOF
+    run_sh "" suggest
+    check_contains "custom feat emoji used" "🚀 feat(app):" "$RUN_OUT"
+    check_not_contains "default feat emoji not used" "✨" "$RUN_OUT"
+    if [ "$HAVE_PS1" = true ]; then
+        run_ps1 "" suggest
+        check_contains "ps1 custom feat emoji used" "🚀 feat(app):" "$RUN_OUT"
+        check_not_contains "ps1 default feat emoji not used" "✨" "$RUN_OUT"
+    fi
+
+    new_repo
+    add_file "app.js" "console.log(1)"
+    printf '[general]\nscope = core\n' > .gitwhisperconfig
+    run_sh "" suggest
+    check_contains "forced scope applied" "feat(core):" "$RUN_OUT"
+    if [ "$HAVE_PS1" = true ]; then
+        run_ps1 "" suggest
+        check_contains "ps1 forced scope applied" "feat(core):" "$RUN_OUT"
+    fi
+
+    new_repo
+    mkdir -p src
+    add_file "src/thing.js" "x"
+    printf '[scope]\nsrc = api\n' > .gitwhisperconfig
+    run_sh "" suggest
+    check_contains "scope map dir -> scope" "feat(api):" "$RUN_OUT"
+    if [ "$HAVE_PS1" = true ]; then
+        run_ps1 "" suggest
+        check_contains "ps1 scope map dir -> scope" "feat(api):" "$RUN_OUT"
+    fi
+
+    new_repo
+    printf '[types]\nsecurity = x|Security\n' > .gitwhisperconfig
+    run_sh "" init >/dev/null 2>&1
+    printf 'security: harden auth\n' > .git/COMMIT_EDITMSG
+    bash .git/hooks/commit-msg .git/COMMIT_EDITMSG >/dev/null 2>&1
+    check_exit "commit-msg accepts custom type from [types]" 0 "$?"
+    printf 'nope: random\n' > .git/COMMIT_EDITMSG
+    bash .git/hooks/commit-msg .git/COMMIT_EDITMSG >/dev/null 2>&1
+    check_exit "commit-msg still rejects unknown type" 1 "$?"
+    printf 'feat: still works\n' > .git/COMMIT_EDITMSG
+    bash .git/hooks/commit-msg .git/COMMIT_EDITMSG >/dev/null 2>&1
+    check_exit "commit-msg still accepts default type" 0 "$?"
 }
 
 #
@@ -796,6 +854,52 @@ test_commit_flow() {
     check_not_contains "ps1 changelog no fatal leak" "fatal:" "$RUN_OUT"
 }
 
+test_commit_flow_custom_config() {
+    if [ "${GW_TEST_COMMITS:-0}" != "1" ]; then
+        echo "  skip commit-dependent custom-config tests (set GW_TEST_COMMITS=1 to run)"
+        return
+    fi
+    new_repo
+    add_file "app.js" "console.log(1)"
+    cat > .gitwhisperconfig <<'EOF'
+[types]
+security = x|Security
+security.order = 1
+fix.order = 2
+EOF
+    run_sh "" init >/dev/null 2>&1
+    git commit -q -m "security: harden auth endpoint" --no-verify
+    add_file "README.md" "readme"
+    git commit -q -m "fix: resolve crash" --no-verify
+
+    run_sh "" changelog >/dev/null 2>&1
+    check_exit "changelog with custom types exits 0" 0 "$RUN_EXIT"
+    check_contains "changelog uses custom section title" "Security" "$RUN_OUT"
+    check_contains "changelog keeps default title" "Bug Fixes" "$RUN_OUT"
+
+    local sec_line fix_line
+    sec_line=$(printf '%s\n' "$RUN_OUT" | grep -n "Security" | head -1 | cut -d: -f1)
+    fix_line=$(printf '%s\n' "$RUN_OUT" | grep -n "Bug Fixes" | head -1 | cut -d: -f1)
+    if [ -n "$sec_line" ] && [ -n "$fix_line" ] && [ "$sec_line" -lt "$fix_line" ]; then
+        pass "changelog respects type.order (Security before Bug Fixes)"
+    else
+        fail "changelog respects type.order (Security before Bug Fixes)" "Security at line $sec_line, Bug Fixes at line $fix_line"
+    fi
+
+    if [ "$HAVE_PS1" = true ]; then
+        run_ps1 "" changelog >/dev/null 2>&1
+        check_exit "ps1 changelog with custom types exits 0" 0 "$RUN_EXIT"
+        check_contains "ps1 changelog uses custom section title" "Security" "$RUN_OUT"
+        sec_line=$(printf '%s\n' "$RUN_OUT" | grep -n "Security" | head -1 | cut -d: -f1)
+        fix_line=$(printf '%s\n' "$RUN_OUT" | grep -n "Bug Fixes" | head -1 | cut -d: -f1)
+        if [ -n "$sec_line" ] && [ -n "$fix_line" ] && [ "$sec_line" -lt "$fix_line" ]; then
+            pass "ps1 changelog respects type.order"
+        else
+            fail "ps1 changelog respects type.order" "Security at line $sec_line, Bug Fixes at line $fix_line"
+        fi
+    fi
+}
+
 #
 # main
 #
@@ -812,6 +916,7 @@ test_suggest_multiple_and_empty
 test_suggest_branch_type
 test_suggest_type_refinement
 test_suggest_config
+test_custom_config
 echo ""
 echo "--- init ---"
 test_init_creates_files
@@ -836,6 +941,7 @@ test_parity_cases
 echo ""
 echo "--- commit-dependent ---"
 test_commit_flow
+test_commit_flow_custom_config
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 if [ "$FAIL" -gt 0 ]; then

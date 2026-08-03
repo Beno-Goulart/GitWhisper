@@ -610,41 +610,66 @@ modules/
 
 ## Configuration
 
+Run `gitwhisper init` in a project to create a **`.gitwhisperconfig`** file (INI format). It customizes message generation, changelog/release sections, PR descriptions, and the `commit-msg` hook validation — no script editing required.
+
+```ini
+[general]
+# include emoji in generated commit messages (true/false)
+emoji = true
+
+# suggestion pre-filled by the hook: 1=simple+emoji, 2=simple, 3=detailed+emoji, 4=detailed
+default = 1
+
+# maintainers excluded from the "community contributors" section of the changelog
+core_maintainers = you, yourteam
+
+# force every commit to use this scope, e.g. scope = core
+scope =
+
+[types]
+# customize an existing type's emoji and changelog section title:
+#   <type> = <emoji>|<Section Title>
+# feat = <emoji>|Features
+# fix  = <emoji>|Bug Fixes
+
+# add a brand-new type (it will also be accepted by the commit-msg hook):
+# security = <emoji>|Security
+
+# reorder changelog/PR sections with <type>.order = <number> (default 999):
+# fix.order = 1
+
+[scope]
+# map a directory (prefix match) to a scope:
+#   api = api
+#   core = core
+# When a commit touches several mapped paths, the first match wins.
+
+[hooks]
+# pre-fill the commit message on `git commit` (true/false)
+prepare = true
+
+# reject commits that do not follow Conventional Commits (true/false)
+validate = true
+```
+
 ### Core Maintainers
 
-Users listed here are excluded from the "community contributors" section of release notes:
+Users listed in `general.core_maintainers` are excluded from the "community contributors" section of release notes. GitHub usernames are inferred from the commit author's `@users.noreply.github.com` email or the author name.
 
-```powershell
-# modules/lib.ps1 — shared library loaded by gitwhisper.ps1
-$coreMaintainers = @("yourusername", "yourteam")
-```
+### Custom Types, Emoji and Ordering
 
-```bash
-# modules/lib.sh — shared library sourced by gitwhisper.sh
-CORE_MAINTAINERS=("yourusername" "yourteam")
-```
+The `[types]` section lets you restyle every place a commit type appears — suggested commit messages, changelog/release section titles, PR descriptions, and the `commit-msg` hook's allowed-type regex:
 
-GitHub usernames are inferred from the commit author's `@users.noreply.github.com` email or the author name.
+- `feat = 🚀|Features` overrides the emoji (and, optionally, the changelog section title) for an existing type.
+- A brand-new type such as `security = 🛡️|Security` is added everywhere, including the `commit-msg` hook validation.
+- `fix.order = 1` controls section order in changelog/release/PR output (lower numbers first; unlisted types default to 999, keeping their built-in order).
 
-### Custom Gitmoji
+### Scope Customization
 
-Edit the `$gitmoji` hashtable in `modules/lib.ps1`:
+- `[general] scope = core` forces every generated message to use that scope.
+- `[scope]` maps a directory prefix to a scope (e.g. `src/` → `api`), overriding the folder/branch heuristic.
 
-```powershell
-$gitmoji["feat"] = [char]::ConvertFromUtf32(0x1F680)  # 🚀
-$gitmoji["fix"]  = [char]::ConvertFromUtf32(0x1F525)  # 🔥
-```
-
-### Max Summary Length
-
-The `Truncate-Msg` function enforces a maximum length (default: 50 chars):
-
-```powershell
-function Truncate-Msg {
-    param([string]$Msg, [int]$MaxLen = 50)  # Change to 72 for longer summaries
-    ...
-}
-```
+> **Note:** Edit `.gitwhisperconfig` freely; hooks re-read it at runtime. Re-run `gitwhisper init` only to regenerate the hook files themselves.
 
 ## Compatibility
 
