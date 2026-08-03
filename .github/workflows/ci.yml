@@ -22,6 +22,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Ensure PowerShell (ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -36,15 +40,23 @@ jobs:
           bash -n gitwhisper.sh
           bash -n install.sh
           bash -n tests/run_tests.sh
-          for f in modules/*.sh; do bash -n "$f"; done
 
       - name: Validate PowerShell syntax
         run: |
           if command -v pwsh >/dev/null 2>&1; then
-            pwsh -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw "gitwhisper.ps1")); $null = [scriptblock]::Create((Get-Content -Raw "install.ps1")); Get-ChildItem "modules/*.ps1" | ForEach-Object { $null = [scriptblock]::Create((Get-Content -Raw $_.FullName)) }'
+            pwsh -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw "gitwhisper.ps1")); $null = [scriptblock]::Create((Get-Content -Raw "install.ps1"))'
           else
-            powershell.exe -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw "gitwhisper.ps1")); $null = [scriptblock]::Create((Get-Content -Raw "install.ps1")); Get-ChildItem "modules/*.ps1" | ForEach-Object { $null = [scriptblock]::Create((Get-Content -Raw $_.FullName)) }'
+            powershell.exe -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw "gitwhisper.ps1")); $null = [scriptblock]::Create((Get-Content -Raw "install.ps1"))'
           fi
+
+      - name: Validate Python syntax
+        run: python -m compileall -q python
+
+      - name: Run Python unit tests
+        run: python tests/test_engine.py
+
+      - name: Run desktop installer tests
+        run: node desktop/test-main.js
 
       - name: Run test suite
         run: GW_TEST_COMMITS=1 bash tests/run_tests.sh

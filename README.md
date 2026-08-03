@@ -7,10 +7,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=flat&logo=powershell&logoColor=white" alt="PowerShell">
+  <img src="https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Git-2.0%2B-F05032?style=flat&logo=git&logoColor=white" alt="Git">
   <img src="https://img.shields.io/badge/Conventional%20Commits-1.0-E67E22?style=flat" alt="Conventional Commits">
   <img src="https://img.shields.io/badge/Gitmoji-Supported-FFDD54?style=flat" alt="Gitmoji">
+  <img src="https://img.shields.io/badge/LLM-Ollama%20Compatible-5C5C5C?style=flat&logo=ollama&logoColor=white" alt="Ollama">
 </p>
 
 <p align="center">
@@ -26,6 +27,8 @@
 ---
 
 GitWhisper is a cross-platform tool that analyzes your `git diff` and auto-generates **[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)** messages with **gitmoji** support. It detects file types, infers scope from folder structure, and produces specific descriptions by reading the actual diff content.
+
+All the logic lives in a **single Python 3 engine** (`python/`) shared by the PowerShell and Bash entry points (`gitwhisper.ps1` / `gitwhisper.sh` are thin wrappers) — no duplicated code between platforms. It can also delegate the description to a **local LLM via Ollama** (OpenAI-compatible), with silent automatic fallback to the built-in heuristics when the model is offline, slow, or errors out.
 
 ## Preview
 
@@ -69,10 +72,9 @@ PS C:\MyProject> gitwhisper
 | Polished Release Notes | Groups commits by scope, links PRs `(#123)`, and thanks contributors by username |
 | Undo Commit | Soft or mixed reset of the last commit via `gitwhisper undo` |
 | Staged Only | Only analyzes what's staged (what will be committed) |
-| PS 5.1 Compatible | Unicode escapes for full Windows PowerShell compatibility |
+| LLM Descriptions | Optional local LLM (Ollama, OpenAI-compatible) writes commit descriptions with automatic fallback |
+| Single Python Engine | All logic in one Python 3 codebase, shared by PowerShell and Bash |
 | Cross-Platform | PowerShell for Windows, Bash for Linux/macOS |
-
-| 50/72 Rule | Enforces conventional commit summary length |
 
 ## Quick Start
 
@@ -102,13 +104,13 @@ The GUI installer has two visualizer tabs: **Profile preview** (shows exactly wh
 cd desktop
 npm install
 npm start        # run the app from source
-npm run dist     # build a portable .exe → desktop\dist\GitWhisper-Installer-0.3.0.exe
+npm run dist     # build a portable .exe → desktop\dist\GitWhisper-Installer-1.0.0.exe
 ```
 
 Or just run the pre-built portable exe — no install required:
 
 ```
-desktop\dist\GitWhisper-Installer-0.3.0.exe
+desktop\dist\GitWhisper-Installer-1.0.0.exe
 ```
 
 The desktop app mirrors the WPF installer: pick a profile and integration type, see a live preview of the block that will be appended, install/uninstall, and set up a git project (hooks + `.gitwhisperconfig`) — plus a GitWhisper preview tab that generates a real suggestion from a temporary repository.
@@ -153,11 +155,11 @@ A graphical installer built with [Electron](https://www.electronjs.org/) that do
 
 | Way | Command |
 |---|---|
-| Pre-built portable exe | `desktop\dist\GitWhisper-Installer-0.3.0.exe` |
+| Pre-built portable exe | `desktop\dist\GitWhisper-Installer-1.0.0.exe` |
 | From source | `cd desktop; npm install; npm start` |
 | Build your own exe | `cd desktop; npm install; npm run dist` |
 
-The build produces `desktop\dist\GitWhisper-Installer-0.3.0.exe`, a self-contained portable executable (no installation needed — it stores its state in the app folder and writes only to your profile and `~/.gitwhisper/`).
+The build produces `desktop\dist\GitWhisper-Installer-1.0.0.exe`, a self-contained portable executable (no installation needed — it stores its state in the app folder and writes only to your profile and `~/.gitwhisper/`).
 
 #### How to use it
 
@@ -175,7 +177,7 @@ The build produces `desktop\dist\GitWhisper-Installer-0.3.0.exe`, a self-contain
 
 - The scripts are copied to `~/.gitwhisper/` (not linked to the repo folder), so the app keeps working even if you move or delete the GitWhisper clone.
 - The portable exe is built unsigned (`signAndEditExecutable: false`). SmartScreen may show a warning on first run — click *More info → Run anyway*.
-- Headless test for the main-process logic: `node desktop/test-main.js` (30 checks: install/uninstall/replace/bin-dir detection/project setup/demo).
+- Headless test for the main-process logic: `node desktop/test-main.js` (32 checks: install/uninstall/replace/bin-dir detection/project setup/demo).
 
 ### 2. Use in any project
 
@@ -252,9 +254,31 @@ gitwhisper undo              # unified command
 
 ## Architecture
 
+A single **Python 3 engine** implements all commands. The PowerShell and Bash entry points are thin wrappers that locate `python/main.py` next to the scripts (or in `~/.gitwhisper/`) and forward arguments, stdin/stdout and the exit code — so there is exactly one implementation per command, shared by both platforms.
+
 ```mermaid
 graph TD
-    Script["gitwhisper.ps1 / gitwhisper.sh"]
+    WrapperPS["gitwhisper.ps1 (thin wrapper)"]
+    WrapperSH["gitwhisper.sh (thin wrapper)"]
+
+    subgraph Engine["python/  (single shared engine)"]
+        Main["main.py (argparse + dispatch)"]
+        subgraph Commands
+            Commit["commit.py"]
+            Suggest["suggest.py"]
+            Init["init.py"]
+            Changelog["changelog.py"]
+            Release["release.py"]
+            Pr["pr.py"]
+            Undo["undo.py"]
+            Amend["amend.py"]
+        end
+        Message["message.py (heuristics)"]
+        Detect["detect.py (types/scopes)"]
+        Llm["llm.py (Ollama/OpenAI)"]
+        ReleaseNotes["release_notes.py"]
+        Config["config.py (.gitwhisperconfig)"]
+    end
 
     subgraph Input
         DiffStaged["git diff --staged --name-status"]
@@ -262,37 +286,16 @@ graph TD
         DiffContent["git diff --staged"]
     end
 
-    subgraph Detection
-        FileType["File Type Detection"]
-        ChangePattern["Change Pattern Detection"]
-        DiffAnalysis["Diff Content Analysis"]
-    end
-
-    subgraph Logic
-        Scope["Get-Scope"]
-        Type["Get-CommitType"]
-    end
-
-    subgraph Output
-        Emoji["With Emoji"]
-        NoEmoji["Without Emoji"]
-    end
-
-    Script --> DiffStaged
-    Script --> DiffStat
-    Script --> DiffContent
-
-    DiffStaged --> FileType
-    DiffContent --> DiffAnalysis
-
-    FileType --> Type
-    ChangePattern --> Type
-    DiffAnalysis --> Type
-
-    DiffContent --> Scope
-    Scope --> Type
-    Type --> Emoji
-    Type --> NoEmoji
+    WrapperPS --> Main
+    WrapperSH --> Main
+    DiffStaged --> Detect
+    DiffContent --> Detect
+    Detect --> Message
+    Llm --> Message
+    Main --> Commands
+    Commands --> Message
+    Config --> Message
+    Commands --> Config
 ```
 
 ### Detection Priority
@@ -548,7 +551,9 @@ gitwhisper release --dry-run     # preview without changing anything
 
 | Component | Technology |
 |---|---|
-| Language | PowerShell 5.1+ / Bash 4.0+ |
+| Engine | Python 3.8+ (standard library only — no pip packages) |
+| Wrappers | PowerShell 5.1+ / Bash 4.0+ (thin, forward to the engine) |
+| LLM (optional) | Ollama or any OpenAI-compatible endpoint |
 | Version Control | Git 2.0+ |
 | Convention | [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/) |
 | Emoji | [Gitmoji](https://gitmoji.dev/) |
@@ -558,19 +563,20 @@ gitwhisper release --dry-run     # preview without changing anything
 
 ```
 GitWhisper/
-├── gitwhisper.ps1          # Entry point (Windows PowerShell) - loads modules/
-├── gitwhisper.sh           # Entry point (Linux/macOS Bash) - sources modules/
-├── modules/                # Shared library + one module per command
-│   ├── lib.sh / lib.ps1    # Shared helpers (config, classification, formatting)
-│   ├── commit.sh / .ps1    # invoke_commit / Invoke-Commit
-│   ├── suggest.sh / .ps1   # invoke_suggest / Invoke-Suggest
-│   ├── undo.sh / .ps1      # invoke_undo / Invoke-Undo
-│   ├── amend.sh / .ps1     # invoke_amend / Invoke-Amend
-│   ├── init.sh / .ps1      # invoke_init / Invoke-Init (hooks + config)
-│   ├── pr.sh / .ps1        # invoke_pr / Invoke-Pr
-│   ├── changelog.sh / .ps1 # invoke_changelog / Invoke-Changelog
-│   ├── release.sh / .ps1   # invoke_release / Invoke-Release
-│   └── help.sh / .ps1      # show_help / Show-Help
+├── gitwhisper.ps1           # Thin wrapper (Windows PowerShell) -> python/main.py
+├── gitwhisper.sh            # Thin wrapper (Linux/macOS Bash) -> python/main.py
+├── python/                  # Single shared engine (Python 3, stdlib only)
+│   ├── main.py              # Argument parsing + command dispatch
+│   ├── config.py            # .gitwhisperconfig parser ([general]/[types]/[scope]/[hooks]/[llm])
+│   ├── git_helpers.py       # git subprocess wrappers
+│   ├── ui.py                # UTF-8 output + prompts
+│   ├── detect.py            # Type/scope/branch classification
+│   ├── message.py           # Heuristic message generation + variants
+│   ├── llm.py               # Ollama/OpenAI-compatible integration (auto-fallback)
+│   ├── release_notes.py     # Changelog/release note rendering + semver bump
+│   └── commands/            # One module per command
+│       ├── commit.py  suggest.py  init.py  changelog.py
+│       └── release.py  pr.py  undo.py  amend.py  help.py
 ├── install.ps1             # Global install for PowerShell (interactive wizard)
 ├── install-gui.ps1         # Global install for PowerShell (WPF GUI + visualizer)
 ├── install.sh              # Global install for Bash/Zsh (interactive wizard)
@@ -579,7 +585,10 @@ GitWhisper/
 │   ├── preload.js          # contextBridge between UI and main process
 │   ├── renderer/           # UI (index.html + renderer.js)
 │   ├── test-main.js        # Headless tests for the main process logic
-│   └── dist/               # Built portable exe (GitWhisper-Installer-0.3.0.exe)
+│   └── dist/               # Built portable exe (GitWhisper-Installer-1.0.0.exe)
+├── tests/
+│   ├── run_tests.sh        # Bash parity suite (runs both wrappers)
+│   └── test_engine.py      # Python unit tests (incl. LLM mock server + fallback)
 ├── CHANGELOG.md            # Auto-generated changelog
 ├── LICENSE                 # MIT license
 ├── logo.png                # Project logo
@@ -588,24 +597,28 @@ GitWhisper/
 
 ### Script Sections
 
-The entry points (`gitwhisper.ps1` / `gitwhisper.sh`) only parse arguments, load configuration and dispatch to `modules/`. Each command module implements:
+The entry points (`gitwhisper.ps1` / `gitwhisper.sh`) are thin wrappers: they locate the engine, forward arguments (plus stdin/stdout and the exit code), and nothing else. Every command is implemented once in `python/commands/`:
 
 ```
-modules/
-├── lib / lib.ps1           # Shared helpers (config, diff parsing, classification)
-├── commit.sh / .ps1        # Commit message generation
+python/
+├── main.py                 # Dispatches to the requested command
+├── config.py               # .gitwhisperconfig parsing (shared settings)
+├── message.py              # Heuristic message generation
 │   ├── Diff Parsing        # --name-status, --stat, content
 │   ├── File Classification # Added, modified, deleted, renamed
 │   ├── get_scope           # Folder structure → scope
 │   ├── Commit Type Logic   # Type + description detection
 │   └── Output              # With/without emoji versions
-├── undo.sh / .ps1          # Undo last commit (soft/mixed reset)
-├── changelog.sh / .ps1     # CHANGELOG.md generator
-├── release.sh / .ps1       # Automated release (version + changelog + tag)
-│   ├── Build-ReleaseNotes  # Groups by scope, links PRs, lists contributors
-│   ├── Get-GithubUsername  # Infers GitHub usernames from author info
-│   └── gh release create   # Publishes a GitHub Release (--github)
-└── pr.sh / .ps1            # PR description generator
+├── llm.py                  # Optional LLM descriptions (auto-fallback)
+├── release_notes.py        # CHANGELOG.md / release notes + semver bump
+└── commands/
+    ├── undo.py             # Undo last commit (soft/mixed reset)
+    ├── changelog.py        # CHANGELOG.md generator
+    ├── release.py          # Automated release (version + changelog + tag)
+    │   ├── build_notes     # Groups by scope, links PRs, lists contributors
+    │   ├── get_github_username  # Infers GitHub usernames from author info
+    │   └── gh release create     # Publishes a GitHub Release (--github)
+    └── pr.py               # PR description generator
 ```
 
 ## Configuration
@@ -650,7 +663,41 @@ prepare = true
 
 # reject commits that do not follow Conventional Commits (true/false)
 validate = true
+
+[llm]
+# use a local LLM (OpenAI-compatible, e.g. Ollama) to write commit descriptions.
+# `gitwhisper init` enables it automatically when an Ollama server is reachable.
+enabled = false
+
+# base URL of the OpenAI-compatible endpoint (Ollama exposes /v1)
+url = http://localhost:11434/v1
+
+# model to use (run `ollama list` to see what is installed)
+model = llama3.2
+
+# description = LLM writes the subject only; full = LLM writes the whole message
+mode = description
+
+# seconds to wait for the LLM before falling back to the built-in heuristics
+timeout = 30
+
+# maximum number of tokens in the LLM response
+max_tokens = 150
+
+# API key, only needed for remote providers (leave empty for Ollama)
+#api_key =
 ```
+
+### Local LLM descriptions (Ollama)
+
+The `[llm]` section enables a local model to write the commit description instead of the built-in heuristics:
+
+- Install [Ollama](https://ollama.com/) and pull a model, e.g. `ollama pull llama3.2`.
+- `gitwhisper init` detects a running Ollama server (`GET /api/tags`) and sets `enabled = true` automatically; otherwise the config is created with `enabled = false`.
+- `mode = description` — the LLM writes only the subject's description; the type/scope/emoji come from the heuristics and the four interactive variants stay available.
+- `mode = full` — the LLM writes the whole message (subject + body) and it is committed as-is.
+- The integration speaks the **OpenAI chat-completions protocol** (`POST /v1/chat/completions`), so it works with Ollama and any compatible provider. Set `api_key` only for remote providers.
+- **Automatic fallback:** if the LLM is disabled, unreachable, times out or returns garbage, GitWhisper silently uses the heuristic message — you never get an error for it.
 
 ### Core Maintainers
 
@@ -675,13 +722,14 @@ The `[types]` section lets you restyle every place a commit type appears — sug
 
 | Requirement | Version |
 |---|---|
-| **Windows PowerShell** | 5.1+ |
-| **PowerShell Core** | 7.0+ |
-| **Bash** | 4.0+ |
+| **Python** | 3.8+ (standard library only) |
+| **Windows PowerShell** | 5.1+ (wrapper) |
+| **PowerShell Core** | 7.0+ (wrapper) |
+| **Bash** | 4.0+ (wrapper) |
 | **Git** | 2.0+ |
 | **OS** | Windows, Linux, macOS |
 
-> **Note:** Emojis are generated using `[char]::ConvertFromUtf32()` for full compatibility with Windows PowerShell's default UTF-8 handling.
+> **Note:** The Python engine writes UTF-8 directly to stdout and the wrappers force UTF-8 decoding, so emojis and non-ASCII text render correctly in Windows PowerShell 5.1 and in git hooks.
 
 ## License
 

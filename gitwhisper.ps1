@@ -1,110 +1,80 @@
+# GitWhisper entry point (PowerShell).
+# Thin wrapper that forwards to the Python engine in ./python.
 param(
     [Parameter(Position = 0)]
     [string]$Command = "",
     [Parameter()]
+    [Alias("h")]
     [switch]$Help,
-    [Parameter()]
-    [switch]$Undo,
-    [Parameter()]
-    [switch]$SinceTag,
-    [Parameter()]
-    [int]$Limit = 50,
-    [Parameter()]
-    [switch]$DryRun,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ExtraArgs
 )
 
 $ErrorActionPreference = "Stop"
 
-# Root of the GitWhisper installation. Used by Get-GitwhisperCommand (init)
-# to build the command the prepare hook will call.
-$script:GW_SCRIPT_ROOT = $PSScriptRoot
-
-# Load shared library and command modules (in dependency order).
-. "$PSScriptRoot/modules/lib.ps1"
-. "$PSScriptRoot/modules/help.ps1"
-. "$PSScriptRoot/modules/undo.ps1"
-. "$PSScriptRoot/modules/amend.ps1"
-. "$PSScriptRoot/modules/commit.ps1"
-. "$PSScriptRoot/modules/suggest.ps1"
-. "$PSScriptRoot/modules/init.ps1"
-. "$PSScriptRoot/modules/pr.ps1"
-. "$PSScriptRoot/modules/changelog.ps1"
-. "$PSScriptRoot/modules/release.ps1"
-
-if ($DryRun -or $Command -eq "--dry-run" -or $Command -eq "-n" -or ($ExtraArgs -contains "--dry-run") -or ($ExtraArgs -contains "-n")) {
-    $DryRun = $true
-    if (-not $Command -or $Command -eq "--dry-run" -or $Command -eq "-n") {
-        $Command = ""
-    }
-}
-
-$Base = ""
-if ($ExtraArgs) {
-    for ($i = 0; $i -lt $ExtraArgs.Count; $i++) {
-        if ($ExtraArgs[$i] -eq "--base" -and $i + 1 -lt $ExtraArgs.Count) {
-            $Base = $ExtraArgs[$i + 1]
-            break
+function Find-PythonEngine {
+    param([string]$Root)
+    $candidates = @()
+    foreach ($base in @($Root, (Join-Path $HOME ".gitwhisper"))) {
+        if ($base) {
+            $candidates += (Join-Path $base "python\main.py")
         }
     }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+    return ""
 }
 
-if ($Help -or $Command -eq "help" -or $Command -eq "--help" -or $Command -eq "-h") {
-    Show-Help
+function Find-PythonExe {
+    # Validate each candidate by running it: the Microsoft Store alias stubs
+    # print an error and exit non-zero, so they are skipped.
+    foreach ($candidate in @("python3", "python", "py")) {
+        try {
+            $cmd = Get-Command $candidate -ErrorAction Stop
+            if (-not $cmd) {
+                continue
+            }
+            if ($cmd.Source -like "$env:LOCALAPPDATA\Microsoft\WindowsApps\*") {
+                continue
+            }
+            $version = & $cmd.Source --version 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return $cmd.Source
+            }
+        }
+        catch {
+            # try next candidate
+        }
+    }
+    return ""
 }
 
-if (-not (Test-Path ".git")) {
-    Write-Host "Error: Not a git repository." -ForegroundColor Red
+$engine = Find-PythonEngine -Root $PSScriptRoot
+if (-not $engine) {
+    Write-Host "Error: GitWhisper python engine not found." -ForegroundColor Red
     exit 1
 }
 
-$gwConfig = Get-GwConfig
-if ($gwConfig["general.core_maintainers"]) {
-    $script:coreMaintainers = @($gwConfig["general.core_maintainers"] -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-}
-if ($gwConfig["general.scope"]) {
-    $script:gwForcedScope = $gwConfig["general.scope"]
-}
-foreach ($k in $gwConfig.Keys) {
-    if ($k -like "types.*.order") {
-        $base = $k.Substring(6, $k.Length - 12)
-        $hint = 0
-        if ([int]::TryParse($gwConfig[$k], [ref]$hint)) {
-            $script:gwTypeOrderHints[$base] = $hint
-        }
-    }
-    elseif ($k -like "types.*") {
-        $type = $k.Substring(6)
-        $parts = @($gwConfig[$k] -split "\|")
-        $script:gwTypeEmoji[$type] = $parts[0].Trim()
-        if ($parts.Count -gt 1 -and $parts[1].Trim()) {
-            $script:gwTypeTitles[$type] = $parts[1].Trim()
-        }
-        if ($script:gwTypeOrder -notcontains $type) { $script:gwTypeOrder += $type }
-    }
-    elseif ($k -like "scope.*") {
-        $script:gwScopeMap[$k.Substring(6)] = $gwConfig[$k]
-    }
-}
-if ($script:gwTypeOrderHints.Count -gt 0) {
-    $script:gwTypeOrder = @($script:gwTypeOrder | Sort-Object @{ Expression = {
-        if ($script:gwTypeOrderHints.ContainsKey($_)) { $script:gwTypeOrderHints[$_] } else { 999 }
-    }; Ascending = $true })
+$python = Find-PythonExe
+if (-not $python) {
+    Write-Host "Error: python not found in PATH. Install Python 3 to use GitWhisper." -ForegroundColor Red
+    exit 1
 }
 
-switch ($Command.ToLower()) {
-    "" { Invoke-Commit }
-    "commit" { Invoke-Commit }
-    "undo" { Invoke-Undo }
-    "amend" { Invoke-Amend }
-    "changelog" { Invoke-Changelog -SinceTag:$SinceTag -Limit $Limit }
-    "release" { Invoke-Release -ExtraArgs $ExtraArgs }
-    "init" { Invoke-Init -Force ($ExtraArgs -contains "--force" -or $ExtraArgs -contains "-Force") }
-    "suggest" { Invoke-Suggest }
-    "pr" { Invoke-Pr -BaseBranch $Base -CreatePR ($ExtraArgs -contains "create") }
-    default {
-        Write-Host "Unknown command: $Command" -ForegroundColor Red
-        Show-Help
-    }
-}
+# Make sure the Python child process speaks UTF-8 and that PowerShell decodes
+# its output as UTF-8 (emojis in Windows PowerShell 5.1 and git hooks).
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
+$env:PYTHONIOENCODING = "utf-8"
+
+$forward = @()
+if ($Help) { $forward += "help" }
+if ($Command) { $forward += $Command }
+if ($ExtraArgs) { $forward += $ExtraArgs }
+
+& $python $engine @forward
+exit $LASTEXITCODE

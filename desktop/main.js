@@ -4,7 +4,7 @@ const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 
-const GW_VERSION = '0.3.0';
+const GW_VERSION = '1.0.0';
 const MARKER_START = '# >>> GitWhisper >>>';
 const MARKER_END = '# <<< GitWhisper <<<';
 
@@ -23,17 +23,19 @@ function scriptPaths() {
   return {
     ps1: path.join(res, 'gitwhisper.ps1'),
     sh: path.join(res, 'gitwhisper.sh'),
-    modules: path.join(res, 'modules'),
+    python: path.join(res, 'python'),
   };
 }
 
-function copyModules(src, dest) {
+function copyDirRecursive(src, dest) {
   if (!fs.existsSync(src)) return;
   fs.mkdirSync(dest, { recursive: true });
   const names = fs.readdirSync(src);
   for (const name of names) {
     const s = path.join(src, name);
-    if (fs.statSync(s).isFile()) fs.copyFileSync(s, path.join(dest, name));
+    const d = path.join(dest, name);
+    if (fs.statSync(s).isDirectory()) copyDirRecursive(s, d);
+    else fs.copyFileSync(s, d);
   }
 }
 
@@ -77,12 +79,12 @@ function installHome() {
 
 function install({ profile, type, binDir }) {
   if (!profile) return { ok: false, message: 'Enter a profile file path first.' };
-  const { ps1, sh, modules } = scriptPaths();
+  const { ps1, sh, python } = scriptPaths();
   const home = installHome();
   fs.mkdirSync(home, { recursive: true });
   if (fs.existsSync(ps1)) fs.copyFileSync(ps1, path.join(home, 'gitwhisper.ps1'));
   if (fs.existsSync(sh)) fs.copyFileSync(sh, path.join(home, 'gitwhisper.sh'));
-  copyModules(modules, path.join(home, 'modules'));
+  copyDirRecursive(python, path.join(home, 'python'));
   ensureProfile(profile);
   removeProfileBlock(profile);
   const isPs = isPowerShellProfile(profile);
@@ -120,7 +122,14 @@ function uninstall({ profile, binDir }) {
       if (fs.existsSync(p)) { fs.unlinkSync(p); removed++; }
     }
   }
-  return { ok: true, message: removed > 0 ? 'Uninstalled. Removed ' + removed + ' wrapper file(s).' : 'Uninstalled.' };
+  const home = installHome();
+  for (const f of ['gitwhisper.ps1', 'gitwhisper.sh']) {
+    const p = path.join(home, f);
+    if (fs.existsSync(p)) { fs.unlinkSync(p); removed++; }
+  }
+  const py = path.join(home, 'python');
+  if (fs.existsSync(py)) { fs.rmSync(py, { recursive: true, force: true }); removed++; }
+  return { ok: true, message: removed > 0 ? 'Uninstalled. Removed ' + removed + ' file(s).' : 'Uninstalled.' };
 }
 
 function preview({ profile, type, binDir }) {
@@ -139,7 +148,7 @@ function preview({ profile, type, binDir }) {
     lines.push('Scripts will be copied to:');
     lines.push('  ' + path.join(home, 'gitwhisper.ps1'));
     lines.push('  ' + path.join(home, 'gitwhisper.sh'));
-    lines.push('  ' + path.join(home, 'modules', ''));
+    lines.push('  ' + path.join(home, 'python', ''));
     lines.push('');
     lines.push('Block to be appended to the profile:');
     lines.push('');
@@ -155,7 +164,7 @@ function preview({ profile, type, binDir }) {
     lines.push('Scripts will be copied to:');
     lines.push('  ' + path.join(home, 'gitwhisper.ps1'));
     lines.push('  ' + path.join(home, 'gitwhisper.sh'));
-    lines.push('  ' + path.join(home, 'modules', ''));
+    lines.push('  ' + path.join(home, 'python', ''));
     lines.push('');
     lines.push('Function to be appended to the profile:');
     lines.push('');

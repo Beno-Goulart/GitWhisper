@@ -48,7 +48,7 @@ fs.mkdirSync(projDir, { recursive: true });
   const sp = main.scriptPaths();
   check('ps1 script resolved', fs.existsSync(sp.ps1));
   check('sh script resolved', fs.existsSync(sp.sh));
-  check('modules dir resolved', fs.existsSync(sp.modules) && fs.readdirSync(sp.modules).some((n) => n.endsWith('.ps1')) && fs.readdirSync(sp.modules).some((n) => n.endsWith('.sh')));
+  check('python engine resolved', fs.existsSync(sp.python) && fs.existsSync(path.join(sp.python, 'main.py')));
 
   console.log('-- preview function mode --');
   const p1 = main.preview({ profile: psProfile, type: 'function' });
@@ -62,7 +62,7 @@ fs.mkdirSync(projDir, { recursive: true });
   const content1 = fs.readFileSync(psProfile, 'utf8');
   check('profile has function', content1.includes('function gitwhisper'));
   check('scripts copied home', fs.existsSync(path.join(os.homedir(), '.gitwhisper', 'gitwhisper.ps1')));
-  check('modules copied home', fs.existsSync(path.join(os.homedir(), '.gitwhisper', 'modules', 'lib.ps1')));
+  check('python engine copied home', fs.existsSync(path.join(os.homedir(), '.gitwhisper', 'python', 'main.py')));
 
   const p2 = main.preview({ profile: psProfile, type: 'function' });
   check('preview detects installed', /already exists/.test(p2.status));

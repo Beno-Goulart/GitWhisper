@@ -2,3 +2,7 @@
 desktop/node_modules/
 desktop/dist/
 desktop/*.log
+
+# Python engine
+__pycache__/
+*.pyc
