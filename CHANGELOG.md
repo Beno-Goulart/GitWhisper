@@ -3,6 +3,62 @@
 All notable changes to this project will be documented in this file.
 
 Format: [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+## [0.3.0](2026-08-02)
+
+### Modules
+
+#### Features
+
+- adds git commit
+- adds -Body parameter and adds --force, Force flag
+
+
+### Tests
+
+#### Features
+
+- adds test_suggest_type_refinement function and adds git diff, add, rm
+
+
+### Contributors
+
+Thank you to 1 community contributor:
+
+@Beno-Goulart
+- feat(tests): adds test_suggest_type_refinement function and adds git diff, add, rm
+- feat(modules): adds -Body parameter and adds --force, Force flag
+- feat(modules): adds git commit
+
+**Contributors:** @Beno-Goulart
+
+## [0.3.0](2026-08-02)
+
+### Modules
+
+#### Features
+
+- adds git commit
+- adds -Body parameter and adds --force, Force flag
+
+
+### Tests
+
+#### Features
+
+- adds test_suggest_type_refinement function and adds git diff, add, rm
+
+
+### Contributors
+
+Thank you to 1 community contributor:
+
+@Beno-Goulart
+- feat(tests): adds test_suggest_type_refinement function and adds git diff, add, rm
+- feat(modules): adds -Body parameter and adds --force, Force flag
+- feat(modules): adds git commit
+
+**Contributors:** @Beno-Goulart
+
 ## [0.2.2](2026-08-02)
 
 ### Tests
@@ -181,5 +237,7 @@ Thank you to 2 community contributors:
 - feat(auth): adds amend, PR generation, and auto-detection improvements
 
 **Contributors:** @Beno-Goulart, @135740382
+
+
 
 
