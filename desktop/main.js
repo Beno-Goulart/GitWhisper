@@ -23,7 +23,18 @@ function scriptPaths() {
   return {
     ps1: path.join(res, 'gitwhisper.ps1'),
     sh: path.join(res, 'gitwhisper.sh'),
+    modules: path.join(res, 'modules'),
   };
+}
+
+function copyModules(src, dest) {
+  if (!fs.existsSync(src)) return;
+  fs.mkdirSync(dest, { recursive: true });
+  const names = fs.readdirSync(src);
+  for (const name of names) {
+    const s = path.join(src, name);
+    if (fs.statSync(s).isFile()) fs.copyFileSync(s, path.join(dest, name));
+  }
 }
 
 function isPowerShellProfile(p) {
@@ -66,11 +77,12 @@ function installHome() {
 
 function install({ profile, type, binDir }) {
   if (!profile) return { ok: false, message: 'Enter a profile file path first.' };
-  const { ps1, sh } = scriptPaths();
+  const { ps1, sh, modules } = scriptPaths();
   const home = installHome();
   fs.mkdirSync(home, { recursive: true });
   if (fs.existsSync(ps1)) fs.copyFileSync(ps1, path.join(home, 'gitwhisper.ps1'));
   if (fs.existsSync(sh)) fs.copyFileSync(sh, path.join(home, 'gitwhisper.sh'));
+  copyModules(modules, path.join(home, 'modules'));
   ensureProfile(profile);
   removeProfileBlock(profile);
   const isPs = isPowerShellProfile(profile);
@@ -127,6 +139,7 @@ function preview({ profile, type, binDir }) {
     lines.push('Scripts will be copied to:');
     lines.push('  ' + path.join(home, 'gitwhisper.ps1'));
     lines.push('  ' + path.join(home, 'gitwhisper.sh'));
+    lines.push('  ' + path.join(home, 'modules', ''));
     lines.push('');
     lines.push('Block to be appended to the profile:');
     lines.push('');
@@ -142,6 +155,7 @@ function preview({ profile, type, binDir }) {
     lines.push('Scripts will be copied to:');
     lines.push('  ' + path.join(home, 'gitwhisper.ps1'));
     lines.push('  ' + path.join(home, 'gitwhisper.sh'));
+    lines.push('  ' + path.join(home, 'modules', ''));
     lines.push('');
     lines.push('Function to be appended to the profile:');
     lines.push('');

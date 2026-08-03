@@ -31,6 +31,10 @@
       {
         "from": "../gitwhisper.sh",
         "to": "scripts/gitwhisper.sh"
+      },
+      {
+        "from": "../modules",
+        "to": "scripts/modules"
       }
     ],
     "win": {

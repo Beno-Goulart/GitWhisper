@@ -558,8 +558,19 @@ gitwhisper release --dry-run     # preview without changing anything
 
 ```
 GitWhisper/
-├── gitwhisper.ps1          # Unified script (Windows PowerShell)
-├── gitwhisper.sh           # Unified script (Linux/macOS Bash)
+├── gitwhisper.ps1          # Entry point (Windows PowerShell) - loads modules/
+├── gitwhisper.sh           # Entry point (Linux/macOS Bash) - sources modules/
+├── modules/                # Shared library + one module per command
+│   ├── lib.sh / lib.ps1    # Shared helpers (config, classification, formatting)
+│   ├── commit.sh / .ps1    # invoke_commit / Invoke-Commit
+│   ├── suggest.sh / .ps1   # invoke_suggest / Invoke-Suggest
+│   ├── undo.sh / .ps1      # invoke_undo / Invoke-Undo
+│   ├── amend.sh / .ps1     # invoke_amend / Invoke-Amend
+│   ├── init.sh / .ps1      # invoke_init / Invoke-Init (hooks + config)
+│   ├── pr.sh / .ps1        # invoke_pr / Invoke-Pr
+│   ├── changelog.sh / .ps1 # invoke_changelog / Invoke-Changelog
+│   ├── release.sh / .ps1   # invoke_release / Invoke-Release
+│   └── help.sh / .ps1      # show_help / Show-Help
 ├── install.ps1             # Global install for PowerShell (interactive wizard)
 ├── install-gui.ps1         # Global install for PowerShell (WPF GUI + visualizer)
 ├── install.sh              # Global install for Bash/Zsh (interactive wizard)
@@ -577,21 +588,24 @@ GitWhisper/
 
 ### Script Sections
 
+The entry points (`gitwhisper.ps1` / `gitwhisper.sh`) only parse arguments, load configuration and dispatch to `modules/`. Each command module implements:
+
 ```
-gitwhisper.ps1 / gitwhisper.sh
-├── invoke_commit           # Commit message generation
+modules/
+├── lib / lib.ps1           # Shared helpers (config, diff parsing, classification)
+├── commit.sh / .ps1        # Commit message generation
 │   ├── Diff Parsing        # --name-status, --stat, content
 │   ├── File Classification # Added, modified, deleted, renamed
 │   ├── get_scope           # Folder structure → scope
 │   ├── Commit Type Logic   # Type + description detection
 │   └── Output              # With/without emoji versions
-├── invoke_undo             # Undo last commit (soft/mixed reset)
-├── invoke_changelog        # CHANGELOG.md generator
-├── invoke_release          # Automated release (version + changelog + tag)
+├── undo.sh / .ps1          # Undo last commit (soft/mixed reset)
+├── changelog.sh / .ps1     # CHANGELOG.md generator
+├── release.sh / .ps1       # Automated release (version + changelog + tag)
 │   ├── Build-ReleaseNotes  # Groups by scope, links PRs, lists contributors
 │   ├── Get-GithubUsername  # Infers GitHub usernames from author info
 │   └── gh release create   # Publishes a GitHub Release (--github)
-└── invoke_pr               # PR description generator
+└── pr.sh / .ps1            # PR description generator
 ```
 
 ## Configuration
@@ -601,12 +615,12 @@ gitwhisper.ps1 / gitwhisper.sh
 Users listed here are excluded from the "community contributors" section of release notes:
 
 ```powershell
-# gitwhisper.ps1 — near the top of the script
+# modules/lib.ps1 — shared library loaded by gitwhisper.ps1
 $coreMaintainers = @("yourusername", "yourteam")
 ```
 
 ```bash
-# gitwhisper.sh — near the top of the script
+# modules/lib.sh — shared library sourced by gitwhisper.sh
 CORE_MAINTAINERS=("yourusername" "yourteam")
 ```
 
@@ -614,7 +628,7 @@ GitHub usernames are inferred from the commit author's `@users.noreply.github.co
 
 ### Custom Gitmoji
 
-Edit the `$gitmoji` hashtable in the script:
+Edit the `$gitmoji` hashtable in `modules/lib.ps1`:
 
 ```powershell
 $gitmoji["feat"] = [char]::ConvertFromUtf32(0x1F680)  # 🚀
