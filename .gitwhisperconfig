@@ -47,7 +47,7 @@ enabled = true
 url = http://localhost:11434/v1
 
 # model to use (run `ollama list` to see what is installed)
-model = phi3:mini
+model = gemma2:2b
 
 # description = LLM writes the subject only; full = LLM writes the whole message
 mode = description
