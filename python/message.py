@@ -246,12 +246,18 @@ def render_variants(m, desc, detail_desc=None):
     emoji_on = m["emoji_on"]
     default = m["default"]
     variants = {
-        1: sw if emoji_on else so,
-        2: so,
-        3: dw if emoji_on else do,
-        4: do,
+        "simple_with_emoji": sw if emoji_on else so,
+        "simple_without_emoji": so,
+        "detail_with_emoji": dw if emoji_on else do,
+        "detail_without_emoji": do,
     }
-    return variants, variants[default]
+    title = {
+        1: variants["simple_with_emoji"],
+        2: variants["simple_without_emoji"],
+        3: variants["detail_with_emoji"],
+        4: variants["detail_without_emoji"],
+    }[default]
+    return variants, title
 
 
 def build_body(added, modified, deleted, desc, detail_desc):

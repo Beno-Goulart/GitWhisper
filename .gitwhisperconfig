@@ -38,3 +38,25 @@ prepare = true
 
 # reject commits that do not follow Conventional Commits (true/false)
 validate = true
+
+[llm]
+# use a local LLM (OpenAI-compatible, e.g. Ollama) to write commit descriptions.
+enabled = true
+
+# base URL of the OpenAI-compatible endpoint (Ollama exposes /v1)
+url = http://localhost:11434/v1
+
+# model to use (run `ollama list` to see what is installed)
+model = phi3:mini
+
+# description = LLM writes the subject only; full = LLM writes the whole message
+mode = description
+
+# seconds to wait for the LLM before falling back to the built-in heuristics
+timeout = 30
+
+# maximum number of tokens in the LLM response
+max_tokens = 150
+
+# API key, only needed for remote providers (leave empty for Ollama)
+#api_key =

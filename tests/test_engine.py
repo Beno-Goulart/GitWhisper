@@ -286,8 +286,8 @@ class TestMessage(unittest.TestCase):
         cfg = config_mod.Config()
         m = self._msg(["app.js"], [], [], "+console.log(1)", cfg)
         variants, title = message.render_variants(m, "adds fuzzy matching")
-        self.assertEqual(variants[1], "\u2728 feat(app): adds fuzzy matching")
-        self.assertEqual(variants[3], "\u2728 feat(app): updates scripts (app)")
+        self.assertEqual(variants["simple_with_emoji"], "\u2728 feat(app): adds fuzzy matching")
+        self.assertEqual(variants["detail_with_emoji"], "\u2728 feat(app): updates scripts (app)")
         self.assertEqual(title, "\u2728 feat(app): adds fuzzy matching")
 
     def test_branch_type_override(self):

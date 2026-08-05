@@ -200,6 +200,8 @@ function demo(description) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gw-demo-'));
   try {
     run('git', ['init', '-q'], tmp);
+    run('git', ['config', 'user.name', 'GitWhisper Demo'], tmp);
+    run('git', ['config', 'user.email', 'gitwhisper@example.com'], tmp);
     const tree = run('git', ['write-tree'], tmp).trim();
     const commit = run('git', ['commit-tree', tree], tmp, 'baseline').trim();
     run('git', ['update-ref', 'HEAD', commit], tmp);

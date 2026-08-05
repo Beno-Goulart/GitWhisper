@@ -1,7 +1,7 @@
 {
   "name": "gitwhisper-desktop",
   "productName": "GitWhisper Installer",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "description": "GitWhisper graphical installer - Conventional Commits + gitmoji, automatically.",
   "main": "main.js",
   "author": "GitWhisper",
