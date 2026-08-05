@@ -66,6 +66,9 @@ timeout = 30
 # maximum number of tokens in the LLM response
 max_tokens = 150
 
+# language of the LLM output, e.g. pt-BR, en, es (empty = model default)
+language = __LLM_LANGUAGE__
+
 # API key, only needed for remote providers (leave empty for Ollama)
 #api_key =
 """
@@ -228,6 +231,7 @@ def _new_config_file():
     else:
         enabled = "false"
     content = CONFIG_TEMPLATE.replace("__LLM_ENABLED__", enabled)
+    content = content.replace("__LLM_LANGUAGE__", "en")
     with open(".gitwhisperconfig", "w", encoding="utf-8", newline="") as fh:
         fh.write(content)
     out("  Created .gitwhisperconfig")

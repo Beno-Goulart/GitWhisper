@@ -56,6 +56,7 @@ class Config:
         self.llm_timeout = 30
         self.llm_max_tokens = 150
         self.llm_api_key = ""
+        self.llm_language = ""
 
     def gitmoji(self, type_name):
         emoji = DEFAULT_GITMOJI.get(type_name, "\U0001F528")  # 🔨 fallback
@@ -167,5 +168,7 @@ def load_config(path=".gitwhisperconfig"):
             pass
     if raw.get("llm.api_key", ""):
         cfg.llm_api_key = raw["llm.api_key"]
+    if raw.get("llm.language", ""):
+        cfg.llm_language = raw["llm.language"]
 
     return cfg

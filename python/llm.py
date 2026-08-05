@@ -60,6 +60,8 @@ def suggest(cfg, added, modified, deleted, diff_content, m):
         return None, None
     try:
         files, diff = _build_context(added, modified, deleted, diff_content)
+        lang = cfg.llm_language.strip()
+        lang_line = "Write the output in %s." % lang if lang else ""
         heuristic_title = m["title"] if m else ""
         if cfg.llm_mode == "full":
             prompt = (
@@ -67,9 +69,11 @@ def suggest(cfg, added, modified, deleted, diff_content, m):
                 "Files changed:\n%s\n\n"
                 "Git diff (truncated):\n%s\n\n"
                 "Heuristic suggestion (for reference only):\n%s\n\n"
+                "%s"
                 "Write ONLY the final commit message: a subject line, a blank line, "
                 "and a short bullet list of the main changes. No commentary, no quotes."
-                % ("\n".join(files), diff, heuristic_title)
+                % ("\n".join(files), diff, heuristic_title,
+                   (lang_line + "\n\n") if lang_line else "")
             )
             content = chat(cfg, [
                 {"role": "system", "content": "You are an expert at writing concise Conventional Commits messages."},
@@ -96,10 +100,12 @@ def suggest(cfg, added, modified, deleted, diff_content, m):
                 "Files changed:\n%s\n\n"
                 "Git diff (truncated):\n%s\n\n"
                 "Heuristic subject: %s\n\n"
+                "%s"
                 "Write ONLY the description text that goes after "
                 "'<type>(<scope>): '. Imperative mood, under 50 characters. "
                 "No type, no scope, no emoji, no quotes."
-                % ("\n".join(files), diff, heuristic_title)
+                % ("\n".join(files), diff, heuristic_title,
+                   (lang_line + "\n\n") if lang_line else "")
             )
             content = chat(cfg, [
                 {"role": "system", "content": "You are an expert at writing concise Git commit subject lines."},

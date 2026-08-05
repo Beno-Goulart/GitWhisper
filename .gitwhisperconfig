@@ -58,5 +58,8 @@ timeout = 30
 # maximum number of tokens in the LLM response
 max_tokens = 150
 
+# language of the LLM output, e.g. pt-BR, en, es (empty = model default)
+language = pt-BR
+
 # API key, only needed for remote providers (leave empty for Ollama)
 #api_key =

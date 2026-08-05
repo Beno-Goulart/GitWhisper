@@ -160,6 +160,7 @@ class TestConfig(unittest.TestCase):
             "[hooks]\nprepare = false\nvalidate = true\n\n"
             "[llm]\nenabled = true\nurl = http://x/v1\nmodel = qwen2.5\n"
             "mode = full\ntimeout = 12\nmax_tokens = 99\napi_key = k\n"
+            "language = pt-BR\n"
         )
         cfg = config_mod.load_config()
         self.assertFalse(cfg.hooks_prepare)
@@ -171,6 +172,12 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg.llm_timeout, 12)
         self.assertEqual(cfg.llm_max_tokens, 99)
         self.assertEqual(cfg.llm_api_key, "k")
+        self.assertEqual(cfg.llm_language, "pt-BR")
+
+    def test_llm_language_default_empty(self):
+        self._write("[llm]\nenabled = true\n")
+        cfg = config_mod.load_config()
+        self.assertEqual(cfg.llm_language, "")
 
 
 class TestDetect(unittest.TestCase):
@@ -380,6 +387,19 @@ class TestLlm(unittest.TestCase):
             title, body = llm.suggest(cfg, ["app.js"], [], [], "+x", m)
             self.assertEqual(title, "feat(api): add endpoint")
             self.assertIn("- adds handler", body)
+
+    def test_suggest_language_instruction(self):
+        with MockOllamaServer() as srv:
+            MockOllamaHandler.response_text = "adiciona busca inteligente"
+            cfg = self._cfg(srv)
+            cfg.llm_language = "pt-BR"
+            m = message.compute_message("+x", ["app.js"], [], [], cfg)
+            title, body = llm.suggest(cfg, ["app.js"], [], [], "+x", m)
+            self.assertIn("adiciona busca inteligente", title)
+            post = [r for r in MockOllamaHandler.requests if r[0] == "POST"]
+            payload = json.loads(post[-1][2])
+            user_msg = payload["messages"][-1]["content"]
+            self.assertIn("Write the output in pt-BR.", user_msg)
 
     def test_suggest_disabled(self):
         with MockOllamaServer() as srv:

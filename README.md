@@ -684,6 +684,9 @@ timeout = 30
 # maximum number of tokens in the LLM response
 max_tokens = 150
 
+# language of the LLM output, e.g. pt-BR, en, es (empty = model default)
+language = pt-BR
+
 # API key, only needed for remote providers (leave empty for Ollama)
 #api_key =
 ```
@@ -696,6 +699,7 @@ The `[llm]` section enables a local model to write the commit description instea
 - `gitwhisper init` detects a running Ollama server (`GET /api/tags`) and sets `enabled = true` automatically; otherwise the config is created with `enabled = false`.
 - `mode = description` — the LLM writes only the subject's description; the type/scope/emoji come from the heuristics and the four interactive variants stay available.
 - `mode = full` — the LLM writes the whole message (subject + body) and it is committed as-is.
+- `language = pt-BR` — sets the language of the LLM output (any value is passed to the prompt, e.g. `en`, `es`, `pt-BR`). Leave empty to use the model's default.
 - The integration speaks the **OpenAI chat-completions protocol** (`POST /v1/chat/completions`), so it works with Ollama and any compatible provider. Set `api_key` only for remote providers.
 - **Automatic fallback:** if the LLM is disabled, unreachable, times out or returns garbage, GitWhisper silently uses the heuristic message — you never get an error for it.
 
