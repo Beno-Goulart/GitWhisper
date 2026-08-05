@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ui import setup_encoding  # noqa: E402
 from config import load_config  # noqa: E402
 from commands import amend, changelog, commit, help as help_cmd  # noqa: E402
-from commands import init, pr, release, suggest, undo  # noqa: E402
+from commands import config_menu, init, pr, release, suggest, undo  # noqa: E402
 
 
 def main(argv=None):
@@ -53,6 +53,8 @@ def main(argv=None):
         return suggest.run(cfg, argv, dry_run)
     if cmd == "pr":
         return pr.run(cfg, argv, dry_run)
+    if cmd in ("config", "settings", "cfg"):
+        return config_menu.run(cfg, argv, dry_run)
 
     sys.stdout.write("Unknown command: %s\n" % cmd)
     return help_cmd.run(None, argv)

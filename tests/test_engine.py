@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock as mock
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -28,6 +29,7 @@ import detect  # noqa: E402
 import llm  # noqa: E402
 import message  # noqa: E402
 import release_notes  # noqa: E402
+from commands import config_menu  # noqa: E402
 
 
 def git(repo, *args, check=True):
@@ -424,6 +426,68 @@ class TestLlm(unittest.TestCase):
         self.assertIsNone(body)
 
 
+class TestConfigMenu(unittest.TestCase):
+    def test_validate_bool(self):
+        self.assertEqual(config_menu._validate("bool", "y"), "true")
+        self.assertEqual(config_menu._validate("bool", "yes"), "true")
+        self.assertEqual(config_menu._validate("bool", "true"), "true")
+        self.assertEqual(config_menu._validate("bool", "n"), "false")
+        self.assertEqual(config_menu._validate("bool", "no"), "false")
+        self.assertEqual(config_menu._validate("bool", "false"), "false")
+        self.assertIsNone(config_menu._validate("bool", "maybe"))
+
+    def test_validate_numbers(self):
+        self.assertEqual(config_menu._validate("int1_4", "3"), "3")
+        self.assertIsNone(config_menu._validate("int1_4", "5"))
+        self.assertIsNone(config_menu._validate("int1_4", "x"))
+        self.assertEqual(config_menu._validate("int", "42"), "42")
+        self.assertIsNone(config_menu._validate("int", "x"))
+
+    def test_validate_choice(self):
+        meta = {"choices": ["description", "full"]}
+        self.assertEqual(config_menu._validate("choice", "full", meta), "full")
+        self.assertEqual(config_menu._validate("choice", "2", meta), "full")
+        self.assertIsNone(config_menu._validate("choice", "other", meta))
+
+    def test_render_preserves_comments_and_order(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, ".gitwhisperconfig")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("# header\n[general]\n# emoji toggle\nemoji = true\ndefault = 1\n[llm]\nenabled = false\nmodel = llama3.2\n")
+            orig = config_menu._read_lines(path)
+            sections = config_menu._sections_with_entries(config_menu._parsed_entries(path))
+            sections[0]["entries"][0]["value"] = "false"
+            sections[0]["entries"].append({"section": "general", "key": "scope", "value": "core", "line_idx": -1})
+            llm = [s for s in sections if s["name"] == "llm"][0]
+            llm["entries"][0]["value"] = "true"
+            llm["entries"].pop(1)
+            out_lines = config_menu.render(path, sections, orig)
+            self.assertIn("# header\n", out_lines)
+            self.assertIn("# emoji toggle\n", out_lines)
+            joined = "".join(out_lines)
+            self.assertRegex(joined, r"emoji\s*=\s*false")
+            self.assertIn("default = 1", joined)
+            self.assertIn("scope = core", joined)
+            self.assertRegex(joined, r"enabled\s*=\s*true")
+            self.assertNotIn("model = llama3.2", joined)
+
+    def test_render_adds_new_section(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, ".gitwhisperconfig")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("[general]\nemoji = true\n")
+            orig = config_menu._read_lines(path)
+            sections = config_menu._sections_with_entries(config_menu._parsed_entries(path))
+            sections.append({
+                "name": "scope",
+                "entries": [{"section": "scope", "key": "src", "value": "api", "line_idx": -1}],
+            })
+            out_lines = config_menu.render(path, sections, orig)
+            joined = "".join(out_lines)
+            self.assertIn("[scope]", joined)
+            self.assertIn("src = api", joined)
+
+
 class TestCli(unittest.TestCase):
     def _run_main(self, argv, cwd):
         old = os.getcwd()
@@ -457,6 +521,16 @@ class TestCli(unittest.TestCase):
         # matches the original PS/sh behavior: print help and exit 0
         self.assertEqual(code, 0)
         self.assertIn("Unknown command", out)
+
+    def test_config_menu_exits_cleanly(self):
+        repo = make_repo()
+        with open(os.path.join(repo, ".gitwhisperconfig"), "w", encoding="utf-8") as fh:
+            fh.write("[general]\nemoji = true\n")
+        with mock.patch("builtins.input", return_value=""):
+            code, out = self._run_main(["config"], repo)
+        self.assertEqual(code, 0)
+        self.assertIn("GitWhisper Configuration", out)
+        self.assertIn("No changes made", out)
 
     def test_suggest_end_to_end(self):
         repo = make_repo()

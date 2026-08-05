@@ -21,6 +21,7 @@ def run(cfg, args, dry_run=False):
     out("    gitwhisper pr create        - generate and create PR")
     out("    gitwhisper init         - create .gitwhisperconfig and install git hooks")
     out("    gitwhisper init --force - overwrite existing config and hooks")
+    out("    gitwhisper config       - view/edit .gitwhisperconfig via interactive menu")
     out("    gitwhisper suggest      - print suggested message (used by hooks)")
     out("    gitwhisper --dry-run     - show message without committing")
     out("")
