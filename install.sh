@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-GW_VERSION="1.0.0"
+GW_VERSION="0.4.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GW_SCRIPT="$SCRIPT_DIR/gitwhisper.sh"
 GW_INSTALL_DIR="$HOME/.gitwhisper"

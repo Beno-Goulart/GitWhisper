@@ -4,7 +4,7 @@ const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 
-const GW_VERSION = '1.0.0';
+const GW_VERSION = '0.4.0';
 const MARKER_START = '# >>> GitWhisper >>>';
 const MARKER_END = '# <<< GitWhisper <<<';
 

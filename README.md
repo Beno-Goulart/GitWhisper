@@ -105,13 +105,13 @@ The GUI installer has two visualizer tabs: **Profile preview** (shows exactly wh
 cd desktop
 npm install
 npm start        # run the app from source
-npm run dist     # build a portable .exe → desktop\dist\GitWhisper-Installer-1.0.0.exe
+npm run dist     # build a portable .exe → desktop\dist\GitWhisper-Installer-0.4.0.exe
 ```
 
 Or just run the pre-built portable exe — no install required:
 
 ```
-desktop\dist\GitWhisper-Installer-1.0.0.exe
+desktop\dist\GitWhisper-Installer-0.4.0.exe
 ```
 
 The desktop app mirrors the WPF installer: pick a profile and integration type, see a live preview of the block that will be appended, install/uninstall, and set up a git project (hooks + `.gitwhisperconfig`) — plus a GitWhisper preview tab that generates a real suggestion from a temporary repository.
@@ -156,11 +156,11 @@ A graphical installer built with [Electron](https://www.electronjs.org/) that do
 
 | Way | Command |
 |---|---|
-| Pre-built portable exe | `desktop\dist\GitWhisper-Installer-1.0.0.exe` |
+| Pre-built portable exe | `desktop\dist\GitWhisper-Installer-0.4.0.exe` |
 | From source | `cd desktop; npm install; npm start` |
 | Build your own exe | `cd desktop; npm install; npm run dist` |
 
-The build produces `desktop\dist\GitWhisper-Installer-1.0.0.exe`, a self-contained portable executable (no installation needed — it stores its state in the app folder and writes only to your profile and `~/.gitwhisper/`).
+The build produces `desktop\dist\GitWhisper-Installer-0.4.0.exe`, a self-contained portable executable (no installation needed — it stores its state in the app folder and writes only to your profile and `~/.gitwhisper/`).
 
 #### How to use it
 
@@ -588,7 +588,7 @@ GitWhisper/
 │   ├── preload.js          # contextBridge between UI and main process
 │   ├── renderer/           # UI (index.html + renderer.js)
 │   ├── test-main.js        # Headless tests for the main process logic
-│   └── dist/               # Built portable exe (GitWhisper-Installer-1.0.0.exe)
+│   └── dist/               # Built portable exe (GitWhisper-Installer-0.4.0.exe)
 ├── tests/
 │   ├── run_tests.sh        # Bash parity suite (runs both wrappers)
 │   └── test_engine.py      # Python unit tests (incl. LLM mock server + fallback)

@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$GW_VERSION = "1.0.0"
+$GW_VERSION = "0.4.0"
 $MARKER_START = "# >>> GitWhisper >>>"
 $MARKER_END   = "# <<< GitWhisper <<<"
 $SCRIPT_DIR   = Split-Path -Parent $MyInvocation.MyCommand.Path

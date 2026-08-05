@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 [void][System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
 [void][System.Reflection.Assembly]::LoadWithPartialName("System.Drawing")
 
-$GW_VERSION   = "1.0.0"
+$GW_VERSION   = "0.4.0"
 $SCRIPT_DIR   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $GW_SCRIPT    = Join-Path $SCRIPT_DIR "gitwhisper.ps1"
 $GW_INSTALL_DIR = Join-Path $HOME ".gitwhisper"
@@ -145,7 +145,7 @@ $gitmoji = @{
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="GitWhisper Installer v1.0.0" Width="920" Height="780"
+        Title="GitWhisper Installer v0.4.0" Width="920" Height="780"
         WindowStartupLocation="CenterScreen" FontFamily="Segoe UI" FontSize="12.5">
   <Grid Margin="14">
     <Grid.RowDefinitions>
