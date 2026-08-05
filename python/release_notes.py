@@ -44,7 +44,7 @@ def parse_commit_log(log_text):
         if len(parts) < 5:
             continue
         hash_, message, date, author_name, author_email = [p.strip() for p in parts]
-        m = re.match(r"(\w+)(?:\(([^)]+)\))?[!]?:\s*(.+)", message)
+        m = re.match(r"^\W*(\w+)(?:\(([^)]+)\))?[!]?:\s*(.+)", message)
         if not m:
             continue
         ctype = m.group(1).lower()

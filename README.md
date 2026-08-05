@@ -73,6 +73,7 @@ PS C:\MyProject> gitwhisper
 | Undo Commit | Soft or mixed reset of the last commit via `gitwhisper undo` |
 | Staged Only | Only analyzes what's staged (what will be committed) |
 | LLM Descriptions | Optional local LLM (Ollama, OpenAI-compatible) writes commit descriptions with automatic fallback |
+| Config Menu | `gitwhisper config` views/edits `.gitwhisperconfig` through an interactive menu with validation |
 | Single Python Engine | All logic in one Python 3 codebase, shared by PowerShell and Bash |
 | Cross-Platform | PowerShell for Windows, Bash for Linux/macOS |
 
@@ -235,7 +236,7 @@ gitwhisper undo              # unified command
 
 | Command | Description |
 |---|---|
-| `gitwhisper` | Unified command: `gitwhisper [commit\|undo\|amend\|changelog\|release\|pr\|help]` |
+| `gitwhisper` | Unified command: `gitwhisper [commit\|undo\|amend\|changelog\|release\|pr\|config\|help]` |
 
 ### Direct script usage
 
@@ -251,6 +252,7 @@ gitwhisper undo              # unified command
 | `.\gitwhisper.ps1 release -Github` / `./gitwhisper.sh release --github` | Also publish a GitHub Release via the `gh` CLI |
 | `.\gitwhisper.ps1 release -Minor` / `./gitwhisper.sh release --minor` | Force a minor bump (`-Major` / `-Patch` also supported) |
 | `.\gitwhisper.ps1 release -Version 1.2.3` / `./gitwhisper.sh release --version 1.2.3` | Use an explicit version |
+| `.\gitwhisper.ps1 config` / `./gitwhisper.sh config` | View/edit `.gitwhisperconfig` via an interactive menu (`settings` / `cfg` also work) |
 
 ## Architecture
 
@@ -272,6 +274,7 @@ graph TD
             Pr["pr.py"]
             Undo["undo.py"]
             Amend["amend.py"]
+            ConfigMenu["config_menu.py"]
         end
         Message["message.py (heuristics)"]
         Detect["detect.py (types/scopes)"]
@@ -576,7 +579,7 @@ GitWhisper/
 │   ├── release_notes.py     # Changelog/release note rendering + semver bump
 │   └── commands/            # One module per command
 │       ├── commit.py  suggest.py  init.py  changelog.py
-│       └── release.py  pr.py  undo.py  amend.py  help.py
+│       └── release.py  pr.py  undo.py  amend.py  config_menu.py  help.py
 ├── install.ps1             # Global install for PowerShell (interactive wizard)
 ├── install-gui.ps1         # Global install for PowerShell (WPF GUI + visualizer)
 ├── install.sh              # Global install for Bash/Zsh (interactive wizard)
@@ -618,12 +621,48 @@ python/
     │   ├── build_notes     # Groups by scope, links PRs, lists contributors
     │   ├── get_github_username  # Infers GitHub usernames from author info
     │   └── gh release create     # Publishes a GitHub Release (--github)
+    ├── config_menu.py      # Interactive config viewer/editor (gitwhisper config)
     └── pr.py               # PR description generator
 ```
 
 ## Configuration
 
 Run `gitwhisper init` in a project to create a **`.gitwhisperconfig`** file (INI format). It customizes message generation, changelog/release sections, PR descriptions, and the `commit-msg` hook validation — no script editing required.
+
+### Interactive config menu
+
+`gitwhisper config` (aliases: `settings`, `cfg`) opens a menu-driven editor — the same style as the commit flow — so you can view and change the config without editing the file by hand:
+
+```
+=== GitWhisper Configuration ===
+
+  File: .gitwhisperconfig
+
+  [1] General
+  [2] Hooks
+  [3] LLM (Ollama)
+  [4] Types (custom emoji/titles)
+  [5] Scope (directory map)
+  [0] Exit
+
+  Select (0-5): 3
+
+=== LLM (Ollama) ===
+
+  [1] enabled = true
+  [2] model = gemma2:2b
+  [3] mode = description
+  [4] + add key
+  [5] - delete a key
+  [0] Back
+
+  Select (0-5): 2
+  New value for model (Enter=keep): llama3.2
+```
+
+- Values are validated by type: booleans (`true`/`false`), `default` (1–4), integers, and `mode` (`description`/`full`) only accept valid choices.
+- You can add and delete keys (useful for custom `[types]` and `[scope]` mappings).
+- Comments and file ordering are preserved; the file is only rewritten when something actually changed.
 
 ```ini
 [general]
@@ -720,7 +759,7 @@ The `[types]` section lets you restyle every place a commit type appears — sug
 - `[general] scope = core` forces every generated message to use that scope.
 - `[scope]` maps a directory prefix to a scope (e.g. `src/` → `api`), overriding the folder/branch heuristic.
 
-> **Note:** Edit `.gitwhisperconfig` freely; hooks re-read it at runtime. Re-run `gitwhisper init` only to regenerate the hook files themselves.
+> **Note:** Edit `.gitwhisperconfig` freely (or use `gitwhisper config` for a menu); hooks re-read it at runtime. Re-run `gitwhisper init` only to regenerate the hook files themselves.
 
 ## Compatibility
 

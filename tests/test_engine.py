@@ -332,6 +332,14 @@ class TestReleaseNotes(unittest.TestCase):
         self.assertEqual(c["pr"], "42")
         self.assertEqual(c["hash"], "abc1234")
 
+    def test_parse_commit_log_with_emoji(self):
+        log = "abc1234|\u2728 feat(python): adds the config menu|2026-01-01|Test|test@example.com"
+        commits = release_notes.parse_commit_log(log)
+        self.assertEqual(len(commits), 1)
+        self.assertEqual(commits[0]["type"], "feat")
+        self.assertEqual(commits[0]["scope"], "python")
+        self.assertEqual(commits[0]["description"], "adds the config menu")
+
     def test_parse_commit_log_skips_non_conventional(self):
         log = "abc1234|random message|2026-01-01|Test|test@example.com"
         self.assertEqual(release_notes.parse_commit_log(log), [])

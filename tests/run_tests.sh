@@ -115,6 +115,7 @@ test_help() {
     check_contains "help lists init" "gitwhisper init" "$RUN_OUT"
     check_contains "help lists suggest" "gitwhisper suggest" "$RUN_OUT"
     check_contains "help lists undo" "gitwhisper undo" "$RUN_OUT"
+    check_contains "help lists config" "gitwhisper config" "$RUN_OUT"
 
     run_sh "" bogus
     check_contains "unknown command shows message" "Unknown command" "$RUN_OUT"
