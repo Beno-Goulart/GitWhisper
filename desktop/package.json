@@ -33,8 +33,13 @@
         "to": "scripts/gitwhisper.sh"
       },
       {
-        "from": "../modules",
-        "to": "scripts/modules"
+        "from": "../python",
+        "to": "scripts/python",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
       }
     ],
     "win": {

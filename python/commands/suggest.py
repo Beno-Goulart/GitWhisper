@@ -16,7 +16,10 @@ def run(cfg, args, dry_run=False):
 
     title, body = m["title"], m["body"]
     if cfg.llm_enabled:
-        lt, lb = llm.suggest(cfg, added, modified, deleted, diff_content, m)
+        lt, lb, lerr = llm.suggest(cfg, added, modified, deleted, diff_content, m)
+        if lerr:
+            sys.stderr.write("GitWhisper: %s\n" % lerr)
+            sys.stderr.write("GitWhisper: using the heuristic message instead.\n")
         if lt:
             title, body = lt, lb
 

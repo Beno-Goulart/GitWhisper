@@ -70,7 +70,11 @@ def run(cfg, args, dry_run=False):
     desc = m["desc"]
 
     if cfg.llm_enabled:
-        lt, lb = llm.suggest(cfg, added, modified, deleted, diff_content, m)
+        lt, lb, lerr = llm.suggest(cfg, added, modified, deleted, diff_content, m)
+        if lerr:
+            out("")
+            out("  Warning: %s" % lerr)
+            out("  Using the heuristic message instead.")
         if lt:
             if cfg.llm_mode == "full":
                 title, body = lt, lb

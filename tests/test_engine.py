@@ -65,6 +65,7 @@ def write_file(repo, rel, content):
 class MockOllamaHandler(BaseHTTPRequestHandler):
     response_text = "adds smart search to results"
     requests = []
+    model_not_found = False
 
     def _json(self, code, payload):
         body = json.dumps(payload).encode("utf-8")
@@ -85,12 +86,12 @@ class MockOllamaHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         payload = self.rfile.read(length).decode("utf-8")
         self.requests.append(("POST", self.path, payload))
-        if self.path == "/v1/chat/completions":
+        if self.path == "/v1/chat/completions" and not self.model_not_found:
             self._json(200, {
                 "choices": [{"message": {"content": self.response_text}}],
             })
         else:
-            self._json(404, {"error": "not found"})
+            self._json(404, {"error": "model 'llama3.2' not found, try pulling it first"})
 
     def log_message(self, *args):
         pass
@@ -103,6 +104,8 @@ class MockOllamaServer:
         self.port = self.server.server_address[1]
 
     def __enter__(self):
+        MockOllamaHandler.model_not_found = False
+        MockOllamaHandler.response_text = "adds smart search to results"
         self.thread.start()
         return self
 
@@ -410,7 +413,7 @@ class TestLlm(unittest.TestCase):
             MockOllamaHandler.response_text = "adds smart search to results"
             cfg = self._cfg(srv)
             m = message.compute_message("+x", ["app.js"], [], [], cfg)
-            title, body = llm.suggest(cfg, ["app.js"], [], [], "+x", m)
+            title, body, err = llm.suggest(cfg, ["app.js"], [], [], "+x", m)
             self.assertIsNotNone(title)
             self.assertIn("adds smart search to results", title)
             self.assertEqual(title.split(": ")[0], "\u2728 feat(app)")
@@ -427,7 +430,7 @@ class TestLlm(unittest.TestCase):
             MockOllamaHandler.response_text = "feat(api): add endpoint\n\n- adds handler\n- wires route"
             cfg = self._cfg(srv, mode="full")
             m = message.compute_message("+x", ["app.js"], [], [], cfg)
-            title, body = llm.suggest(cfg, ["app.js"], [], [], "+x", m)
+            title, body, err = llm.suggest(cfg, ["app.js"], [], [], "+x", m)
             self.assertEqual(title, "feat(api): add endpoint")
             self.assertIn("- adds handler", body)
 
@@ -437,7 +440,7 @@ class TestLlm(unittest.TestCase):
             cfg = self._cfg(srv)
             cfg.llm_language = "pt-BR"
             m = message.compute_message("+x", ["app.js"], [], [], cfg)
-            title, body = llm.suggest(cfg, ["app.js"], [], [], "+x", m)
+            title, body, err = llm.suggest(cfg, ["app.js"], [], [], "+x", m)
             self.assertIn("adiciona busca inteligente", title)
             post = [r for r in MockOllamaHandler.requests if r[0] == "POST"]
             payload = json.loads(post[-1][2])
@@ -447,12 +450,13 @@ class TestLlm(unittest.TestCase):
     def test_suggest_disabled(self):
         with MockOllamaServer() as srv:
             cfg = self._cfg(srv, enabled=False)
-            title, body = llm.suggest(cfg, ["app.js"], [], [], "+x", None)
+            title, body, err = llm.suggest(cfg, ["app.js"], [], [], "+x", None)
             self.assertIsNone(title)
             self.assertIsNone(body)
+            self.assertEqual(err, "")
 
-    def test_fallback_when_server_down(self):
-        # enabled but unreachable -> silent (None, None), not an exception
+    def test_error_when_server_down(self):
+        # enabled but unreachable -> clear warning, not an exception
         import socket
         s = socket.socket()
         s.bind(("127.0.0.1", 0))
@@ -462,9 +466,19 @@ class TestLlm(unittest.TestCase):
         cfg.llm_enabled = True
         cfg.llm_url = "http://127.0.0.1:%d/v1" % port
         cfg.llm_timeout = 1
-        title, body = llm.suggest(cfg, ["app.js"], [], [], "+x", None)
+        title, body, err = llm.suggest(cfg, ["app.js"], [], [], "+x", None)
         self.assertIsNone(title)
         self.assertIsNone(body)
+        self.assertIn("Ollama running", err)
+
+    def test_error_when_model_missing(self):
+        with MockOllamaServer() as srv:
+            MockOllamaHandler.model_not_found = True
+            cfg = self._cfg(srv)
+            title, body, err = llm.suggest(cfg, ["app.js"], [], [], "+x", None)
+            self.assertIsNone(title)
+            self.assertIsNone(body)
+            self.assertIn("ollama pull llama3.2", err)
 
 
 class TestConfigMenu(unittest.TestCase):
