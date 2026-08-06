@@ -50,6 +50,7 @@ def make_repo():
     git(d, "config", "user.email", "test@example.com")
     git(d, "config", "user.name", "Test")
     git(d, "config", "commit.gpgsign", "false")
+    git(d, "config", "tag.gpgsign", "false")
     return d
 
 
@@ -347,6 +348,38 @@ class TestReleaseNotes(unittest.TestCase):
     def test_format_bullet(self):
         self.assertEqual(release_notes.format_bullet({"description": "x"}), "- x")
         self.assertEqual(release_notes.format_bullet({"description": "x", "pr": "7"}), "- x (#7)")
+
+
+class TestChangelog(unittest.TestCase):
+    def test_changelog_preserves_existing_history(self):
+        repo = make_repo()
+        old = os.getcwd()
+        os.chdir(repo)
+        try:
+            write_file(repo, "a.txt", "a")
+            git(repo, "add", "a.txt")
+            git(repo, "commit", "-q", "-m", "feat: first feature")
+            git(repo, "tag", "v0.1.0")
+
+            from commands import changelog as changelog_cmd
+
+            cfg = config_mod.Config()
+            self.assertEqual(changelog_cmd.run(cfg, []), 0)
+            first = open("CHANGELOG.md", encoding="utf-8").read()
+            self.assertIn("## [0.2.0]", first)
+
+            write_file(repo, "b.txt", "b")
+            git(repo, "add", "b.txt")
+            git(repo, "commit", "-q", "-m", "fix: second fix")
+
+            self.assertEqual(changelog_cmd.run(cfg, []), 0)
+            second = open("CHANGELOG.md", encoding="utf-8").read()
+            old_section = first[first.index("## ["):]
+            self.assertEqual(second.count("## ["), 2)
+            self.assertEqual(second.count("- second fix"), 1)
+            self.assertTrue(second.endswith(old_section))
+        finally:
+            os.chdir(old)
 
 
 class TestLlm(unittest.TestCase):

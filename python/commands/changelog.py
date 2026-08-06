@@ -1,4 +1,5 @@
 import datetime
+import os
 
 import git_helpers as git
 import release_notes
@@ -66,10 +67,21 @@ def run(cfg, args, dry_run=False):
 
     today = datetime.date.today().isoformat()
 
-    changelog = CHANGELOG_HEADER + "## [%s](%s)\n\n" % (new_version, today)
-    changelog += release_notes.build_notes(types, all_commits, cfg)
+    section = "## [%s](%s)\n\n%s" % (new_version, today, release_notes.build_notes(types, all_commits, cfg))
 
-    with open("CHANGELOG.md", "w", encoding="utf-8", newline="") as fh:
+    changelog_file = "CHANGELOG.md"
+    existing_content = ""
+    if os.path.isfile(changelog_file):
+        with open(changelog_file, "r", encoding="utf-8", errors="replace") as fh:
+            existing_content = fh.read()
+
+    if existing_content and "## [" in existing_content:
+        idx = existing_content.index("## [")
+        changelog = existing_content[:idx] + section + "\n" + existing_content[idx:]
+    else:
+        changelog = CHANGELOG_HEADER + "\n" + section
+
+    with open(changelog_file, "w", encoding="utf-8", newline="") as fh:
         fh.write(changelog)
 
     out("=== Changelog generated ===")
