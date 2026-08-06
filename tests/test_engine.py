@@ -51,6 +51,7 @@ def make_repo():
     git(d, "config", "user.name", "Test")
     git(d, "config", "commit.gpgsign", "false")
     git(d, "config", "tag.gpgsign", "false")
+    git(d, "config", "core.autocrlf", "false")
     return d
 
 

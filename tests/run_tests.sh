@@ -81,6 +81,7 @@ new_repo() {
     git -C "$REPO" config user.email "test@example.com"
     git -C "$REPO" config user.name "Test"
     git -C "$REPO" config commit.gpgsign false
+    git -C "$REPO" config core.autocrlf false
     cd "$REPO" || return 1
 }
 

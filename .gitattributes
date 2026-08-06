@@ -1,0 +1,12 @@
+# Normalize line endings across platforms.
+# Text files are stored with LF in the repository and checked out with LF,
+# so commits and diffs behave the same on Windows, macOS and Linux.
+* text=auto eol=lf
+
+# Batch files keep CRLF for cmd.exe compatibility.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets are never converted.
+*.png binary
+*.ico binary
